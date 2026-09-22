@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+
+<package format="3">
+
+  <name>wheeltec_autorace_application</name>
+
+  <version>0.0.1</version>
+
+  <description>
+    Camera processing and lane-following algorithms for the Wheeltec AutoRace project.
+  </description>
+
+  <maintainer email="kovacspatrik200436@gmail.com">
+    Kovacs Patrik Janos
+  </maintainer>
+
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+
+</package>

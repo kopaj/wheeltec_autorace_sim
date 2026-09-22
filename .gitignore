@@ -1,0 +1,26 @@
+# ROS 2 / colcon
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+
+# ROS bags
+*.db3
+*.mcap
+
+# Temporary files
+*.swp
+*~
+.DS_Store
