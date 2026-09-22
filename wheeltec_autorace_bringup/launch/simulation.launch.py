@@ -20,7 +20,7 @@ def generate_launch_description():
     world_path = os.path.join(
         gazebo_package,
         'worlds',
-        'empty_world.sdf'
+        'wheeltec_world.sdf'
     )
 
     gazebo = IncludeLaunchDescription(

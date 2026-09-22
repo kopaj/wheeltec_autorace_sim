@@ -1,0 +1,189 @@
+<?xml version="1.0" ?>
+
+<sdf version="1.8">
+
+  <world name="wheeltec_autorace">
+
+    <physics
+      name="physics"
+      type="ignored">
+
+      <max_step_size>0.001</max_step_size>
+
+      <real_time_factor>1.0</real_time_factor>
+
+    </physics>
+
+
+    <!-- Physics -->
+
+    <plugin
+      filename="ignition-gazebo-physics-system"
+      name="ignition::gazebo::systems::Physics">
+    </plugin>
+
+
+    <!-- Allows model / entity commands -->
+
+    <plugin
+      filename="ignition-gazebo-user-commands-system"
+      name="ignition::gazebo::systems::UserCommands">
+    </plugin>
+
+
+    <!-- Required for the Gazebo GUI -->
+
+    <plugin
+      filename="ignition-gazebo-scene-broadcaster-system"
+      name="ignition::gazebo::systems::SceneBroadcaster">
+    </plugin>
+
+
+    <!-- Sensor manager -->
+
+    <plugin
+      filename="ignition-gazebo-sensors-system"
+      name="ignition::gazebo::systems::Sensors">
+
+      <render_engine>ogre2</render_engine>
+
+    </plugin>
+
+
+    <gravity>
+      0 0 -9.81
+    </gravity>
+
+
+    <!-- Sun -->
+
+    <light
+      type="directional"
+      name="sun">
+
+      <cast_shadows>true</cast_shadows>
+
+      <pose>
+        0 0 10 0 0 0
+      </pose>
+
+      <diffuse>
+        0.8 0.8 0.8 1
+      </diffuse>
+
+      <specular>
+        0.2 0.2 0.2 1
+      </specular>
+
+      <attenuation>
+
+        <range>1000</range>
+
+        <constant>0.9</constant>
+
+        <linear>0.01</linear>
+
+        <quadratic>0.001</quadratic>
+
+      </attenuation>
+
+      <direction>
+        -0.5 0.1 -0.9
+      </direction>
+
+    </light>
+
+
+    <!-- Temporary ground -->
+
+    <model name="ground_plane">
+
+      <static>true</static>
+
+      <link name="ground_link">
+
+        <collision name="ground_collision">
+
+          <geometry>
+
+            <plane>
+
+              <normal>
+                0 0 1
+              </normal>
+
+              <size>
+                50 50
+              </size>
+
+            </plane>
+
+          </geometry>
+
+        </collision>
+
+
+        <visual name="ground_visual">
+
+          <geometry>
+
+            <plane>
+
+              <normal>
+                0 0 1
+              </normal>
+
+              <size>
+                50 50
+              </size>
+
+            </plane>
+
+          </geometry>
+
+          <material>
+
+            <ambient>
+              0.7 0.7 0.7 1
+            </ambient>
+
+            <diffuse>
+              0.7 0.7 0.7 1
+            </diffuse>
+
+          </material>
+
+        </visual>
+
+      </link>
+
+    </model>
+
+
+    <!--
+      Wheeltec / Roboworks vehicle.
+
+      The model originates from:
+      robotverseny/robotverseny_gazebo24
+    -->
+
+    <include>
+
+      <uri>
+        package://wheeltec_autorace_description/models/roboworks
+      </uri>
+
+      <name>
+        roboworks
+      </name>
+
+      <pose>
+        0 0 0.0625 0 0 0
+      </pose>
+
+    </include>
+
+
+  </world>
+
+</sdf>
