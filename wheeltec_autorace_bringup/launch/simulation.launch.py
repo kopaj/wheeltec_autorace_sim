@@ -51,7 +51,61 @@ def generate_launch_description():
         ]
     )
 
+    camera_image_gz_topic = (
+        '/world/wheeltec_autorace'
+        '/model/roboworks'
+        '/link/camera_link'
+        '/sensor/my_rgbd_camera'
+        '/image'
+    )
+
+    camera_info_gz_topic = (
+        '/world/wheeltec_autorace'
+        '/model/roboworks'
+        '/link/camera_link'
+        '/sensor/my_rgbd_camera'
+        '/camera_info'
+    )
+
+    camera_image_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='camera_image_bridge',
+        output='screen',
+        arguments=[
+            camera_image_gz_topic
+            + '@sensor_msgs/msg/Image'
+            + '[ignition.msgs.Image'
+        ],
+        remappings=[
+            (
+                camera_image_gz_topic,
+                '/camera/image_raw'
+            )
+        ]
+    )
+
+    camera_info_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='camera_info_bridge',
+        output='screen',
+        arguments=[
+            camera_info_gz_topic
+            + '@sensor_msgs/msg/CameraInfo'
+            + '[ignition.msgs.CameraInfo'
+        ],
+        remappings=[
+            (
+                camera_info_gz_topic,
+                '/camera/camera_info'
+            )
+        ]
+    )
+
     return LaunchDescription([
         gazebo,
-        cmd_vel_bridge
+        cmd_vel_bridge,
+        camera_image_bridge,
+        camera_info_bridge
     ])
