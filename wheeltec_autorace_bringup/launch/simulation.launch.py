@@ -4,12 +4,31 @@ from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
+from launch.actions import SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
+
+    description_package = get_package_share_directory(
+        'wheeltec_autorace_description'
+    )
+
+    models_path = os.path.join(
+        description_package,
+        'models'
+    )
+
+    gazebo_resource_path = SetEnvironmentVariable(
+        name='IGN_GAZEBO_RESOURCE_PATH',
+        value=(
+            models_path
+            + ':'
+            + os.environ.get('IGN_GAZEBO_RESOURCE_PATH', '')
+        )
+    )
 
     gazebo_package = get_package_share_directory(
         'wheeltec_autorace_gazebo'
@@ -22,7 +41,7 @@ def generate_launch_description():
     world_path = os.path.join(
         gazebo_package,
         'worlds',
-        'wheeltec_world.sdf'
+        'racetrack_world.sdf'
     )
 
     gazebo = IncludeLaunchDescription(
@@ -104,6 +123,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        gazebo_resource_path,
         gazebo,
         cmd_vel_bridge,
         camera_image_bridge,
