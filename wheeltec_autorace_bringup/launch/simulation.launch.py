@@ -6,6 +6,8 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
+from launch_ros.actions import Node
+
 
 def generate_launch_description():
 
@@ -36,6 +38,20 @@ def generate_launch_description():
         }.items()
     )
 
+    cmd_vel_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='cmd_vel_bridge',
+        output='screen',
+        arguments=[
+            '/roboworks/cmd_vel@geometry_msgs/msg/Twist]ignition.msgs.Twist'
+        ],
+        remappings=[
+            ('/roboworks/cmd_vel', '/cmd_vel')
+        ]
+    )
+
     return LaunchDescription([
-        gazebo
+        gazebo,
+        cmd_vel_bridge
     ])
