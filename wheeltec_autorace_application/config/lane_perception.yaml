@@ -1,0 +1,74 @@
+lane_perception:
+  ros__parameters:
+
+    # --------------------------------------------------------
+    # ROS topics
+    # --------------------------------------------------------
+
+    input_topic: "/camera/image_raw"
+
+    debug_image_topic: "/lane_detection/debug_image"
+    edges_image_topic: "/lane_detection/edges"
+    mask_image_topic: "/lane_detection/white_mask"
+
+    valid_topic: "/lane_detection/valid"
+
+    error_px_topic: "/lane_detection/cross_track_error_px"
+
+    error_normalized_topic: "/lane_detection/cross_track_error_normalized"
+
+    heading_error_topic: "/lane_detection/heading_error"
+
+    # --------------------------------------------------------
+    # White lane segmentation
+    # --------------------------------------------------------
+
+    white_min_value: 185
+    white_max_saturation: 80
+
+
+    # --------------------------------------------------------
+    # Pre-processing
+    # --------------------------------------------------------
+
+    gaussian_kernel: 5
+
+    canny_low: 50
+    canny_high: 150
+
+
+    # --------------------------------------------------------
+    # HoughLinesP
+    # --------------------------------------------------------
+
+    hough_threshold: 20
+
+    hough_min_line_length: 20.0
+    hough_max_line_gap: 35.0
+
+    min_abs_slope: 0.15
+
+
+    # --------------------------------------------------------
+    # Region of interest
+    # --------------------------------------------------------
+
+    # 0.40 means the ROI starts at 40% of image height.
+
+    roi_top_ratio: 0.30
+
+    roi_top_left_ratio: 0.10
+    roi_top_right_ratio: 0.90
+
+    roi_bottom_ratio: 0.92
+
+
+    # --------------------------------------------------------
+    # Lane evaluation
+    # --------------------------------------------------------
+
+    evaluation_near_ratio: 0.75
+    evaluation_far_ratio: 0.55
+
+    min_lane_width_ratio: 0.15
+    max_lane_width_ratio: 1.10

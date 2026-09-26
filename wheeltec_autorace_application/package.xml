@@ -2,24 +2,59 @@
 
 <package format="3">
 
-  <name>wheeltec_autorace_application</name>
+  <name>
+    wheeltec_autorace_application
+  </name>
 
-  <version>0.0.1</version>
+  <version>
+    0.0.1
+  </version>
 
   <description>
-    Camera processing and lane-following algorithms for the Wheeltec AutoRace project.
+    Camera-based lane perception algorithms for the Wheeltec AutoRace project.
   </description>
 
   <maintainer email="kovacspatrik200436@gmail.com">
     Kovacs Patrik Janos
   </maintainer>
 
-  <license>Apache-2.0</license>
+  <license>
+    Apache-2.0
+  </license>
 
-  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <buildtool_depend>
+    ament_cmake
+  </buildtool_depend>
+
+
+  <depend>
+    rclcpp
+  </depend>
+
+  <depend>
+    sensor_msgs
+  </depend>
+
+  <depend>
+    std_msgs
+  </depend>
+
+  <depend>
+    cv_bridge
+  </depend>
+
+  <depend>
+    libopencv-dev
+  </depend>
+
 
   <export>
-    <build_type>ament_cmake</build_type>
+
+    <build_type>
+      ament_cmake
+    </build_type>
+
   </export>
 
 </package>
