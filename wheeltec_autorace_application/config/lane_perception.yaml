@@ -1,74 +1,67 @@
 lane_perception:
   ros__parameters:
 
-    # --------------------------------------------------------
     # ROS topics
-    # --------------------------------------------------------
-
     input_topic: "/camera/image_raw"
-
     debug_image_topic: "/lane_detection/debug_image"
     edges_image_topic: "/lane_detection/edges"
     mask_image_topic: "/lane_detection/white_mask"
+    birdseye_mask_topic: "/lane_detection/birdseye_mask"
+    birdseye_debug_topic: "/lane_detection/birdseye_debug"
 
     valid_topic: "/lane_detection/valid"
-
+    degraded_topic: "/lane_detection/degraded"
     error_px_topic: "/lane_detection/cross_track_error_px"
-
     error_normalized_topic: "/lane_detection/cross_track_error_normalized"
-
     heading_error_topic: "/lane_detection/heading_error"
+    control_error_topic: "/lane_detection/control_error_normalized"
 
-    # --------------------------------------------------------
     # White lane segmentation
-    # --------------------------------------------------------
-
     white_min_value: 185
     white_max_saturation: 80
-
-
-    # --------------------------------------------------------
-    # Pre-processing
-    # --------------------------------------------------------
-
     gaussian_kernel: 5
 
+    # Canny/Hough are retained for thesis/debug visualization.
+    # They no longer define the control centerline.
     canny_low: 50
     canny_high: 150
-
-
-    # --------------------------------------------------------
-    # HoughLinesP
-    # --------------------------------------------------------
-
     hough_threshold: 20
-
     hough_min_line_length: 20.0
     hough_max_line_gap: 35.0
 
-    min_abs_slope: 0.15
+    # Perspective transform source trapezoid.
+    # This maps the visible track plane to a bird's-eye image.
+    perspective_top_ratio: 0.34
+    perspective_bottom_ratio: 0.90
+    perspective_top_left_ratio: 0.08
+    perspective_top_right_ratio: 0.92
+    perspective_bottom_left_ratio: 0.00
+    perspective_bottom_right_ratio: 1.00
 
+    # Sliding-window curved-lane tracking.
+    sliding_window_count: 10
+    sliding_window_margin_px: 65
+    sliding_window_minpix: 30
+    min_lane_support_pixels: 90
+    histogram_start_ratio: 0.55
 
-    # --------------------------------------------------------
-    # Region of interest
-    # --------------------------------------------------------
+    # Bird's-eye lane geometry.
+    evaluation_near_ratio: 0.86
+    evaluation_far_ratio: 0.58
 
-    # 0.40 means the ROI starts at 40% of image height.
+    # Smaller y means farther ahead in bird's-eye view.
+    control_lookahead_ratio: 0.42
 
-    roi_top_ratio: 0.30
+    # Control error = 20% near center + 80% lookahead center.
+    control_near_weight: 0.20
 
-    roi_top_left_ratio: 0.10
-    roi_top_right_ratio: 0.90
+    # Plausible lane-width range in the current BEV image.
+    # The present perspective transform is not metric-calibrated, therefore
+    # the two lane boundaries are not perfectly parallel and the apparent
+    # width changes with y. Keep this check deliberately permissive; the
+    # controller uses ordering + polynomial continuity as the main geometry.
+    min_lane_width_ratio: 0.08
+    max_lane_width_ratio: 1.30
 
-    roi_bottom_ratio: 0.92
-
-
-    # --------------------------------------------------------
-    # Lane evaluation
-    # --------------------------------------------------------
-
-    evaluation_near_ratio: 0.75
-    evaluation_far_ratio: 0.55
-
-    min_lane_width_ratio: 0.15
-    max_lane_width_ratio: 1.10
+    # Filter for the learned polynomial lane-width model w(y).
+    lane_width_filter_alpha: 0.15

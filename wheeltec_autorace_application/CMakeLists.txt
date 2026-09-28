@@ -26,6 +26,8 @@ find_package(rclcpp REQUIRED)
 
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 
 find_package(cv_bridge REQUIRED)
 
@@ -37,6 +39,10 @@ find_package(
 )
 
 
+# ============================================================
+# Lane perception
+# ============================================================
+
 add_executable(
   lane_perception
   src/lane_perception.cpp
@@ -46,9 +52,7 @@ add_executable(
 target_include_directories(
   lane_perception
   PRIVATE
-
     include
-
     ${OpenCV_INCLUDE_DIRS}
 )
 
@@ -57,10 +61,8 @@ ament_target_dependencies(
   lane_perception
 
   rclcpp
-
   sensor_msgs
   std_msgs
-
   cv_bridge
 )
 
@@ -72,9 +74,41 @@ target_link_libraries(
 )
 
 
+# ============================================================
+# PID lane controller
+# ============================================================
+
+add_executable(
+  pid_lane_controller
+  src/pid_lane_controller.cpp
+)
+
+
+target_include_directories(
+  pid_lane_controller
+  PRIVATE
+    include
+)
+
+
+ament_target_dependencies(
+  pid_lane_controller
+
+  rclcpp
+  geometry_msgs
+  std_msgs
+  std_srvs
+)
+
+
+# ============================================================
+# Installation
+# ============================================================
+
 install(
   TARGETS
     lane_perception
+    pid_lane_controller
 
   DESTINATION
     lib/${PROJECT_NAME}

@@ -1,0 +1,49 @@
+pid_lane_controller:
+  ros__parameters:
+
+    # ROS interfaces
+    error_topic: "/lane_detection/control_error_normalized"
+    valid_topic: "/lane_detection/valid"
+    degraded_topic: "/lane_detection/degraded"
+    cmd_vel_topic: "/cmd_vel"
+
+    enabled_on_start: false
+    perception_timeout_sec: 0.25
+    control_frequency_hz: 20.0
+
+    # PID baseline for the BEV lookahead error.
+    # Do not return to Kp=5.0; that caused straight-line oscillation.
+    kp: 1.8
+    ki: 0.0
+    kd: 0.12
+    integral_limit: 0.50
+    derivative_filter_alpha: 0.18
+    error_deadband: 0.02
+
+    # Normal tracking speed / steering limits.
+    max_angular_z: 0.85
+    max_linear_speed: 0.12
+    min_linear_speed: 0.045
+    degraded_linear_speed: 0.05
+    steering_sign: -1.0
+
+    # Bounded recovery state.
+    # If the lane disappears while the robot was already turning,
+    # continue slowly in the last steering direction for a short time.
+    # If the lane is reacquired, PID tracking resumes immediately.
+    # If not, the robot stops after the timeout.
+    recovery_enabled: true
+    recovery_timeout_sec: 1.20
+    recovery_entry_grace_sec: 0.40
+    recovery_entry_error: 0.06
+    recovery_entry_angular_z: 0.12
+    recovery_linear_speed: 0.035
+    recovery_angular_z: 0.60
+
+    # Debug topics
+    p_term_topic: "/control/pid/p_term"
+    i_term_topic: "/control/pid/i_term"
+    d_term_topic: "/control/pid/d_term"
+    output_topic: "/control/pid/output"
+    active_topic: "/control/pid/active"
+    recovery_active_topic: "/control/pid/recovery_active"
