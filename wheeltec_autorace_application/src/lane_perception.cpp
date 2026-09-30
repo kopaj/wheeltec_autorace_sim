@@ -57,6 +57,12 @@ LanePerception::LanePerception()
   sliding_window_minpix_ = declare_parameter<int>("sliding_window_minpix", 30);
   min_lane_support_pixels_ = declare_parameter<int>("min_lane_support_pixels", 90);
   histogram_start_ratio_ = declare_parameter<double>("histogram_start_ratio", 0.55);
+  fallback_histogram_start_ratio_ =
+    declare_parameter<double>("fallback_histogram_start_ratio", 0.18);
+  fallback_histogram_end_ratio_ =
+    declare_parameter<double>("fallback_histogram_end_ratio", 0.72);
+  fallback_histogram_min_peak_ =
+    declare_parameter<int>("fallback_histogram_min_peak", 3);
 
   evaluation_near_ratio_ = declare_parameter<double>("evaluation_near_ratio", 0.86);
   evaluation_far_ratio_ = declare_parameter<double>("evaluation_far_ratio", 0.58);
@@ -77,6 +83,15 @@ LanePerception::LanePerception()
   min_lane_support_pixels_ = std::max(min_lane_support_pixels_, 10);
 
   histogram_start_ratio_ = std::clamp(histogram_start_ratio_, 0.0, 0.95);
+  fallback_histogram_start_ratio_ =
+    std::clamp(fallback_histogram_start_ratio_, 0.0, 0.90);
+  fallback_histogram_end_ratio_ =
+    std::clamp(
+      fallback_histogram_end_ratio_,
+      fallback_histogram_start_ratio_ + 0.05,
+      1.0);
+  fallback_histogram_min_peak_ =
+    std::max(fallback_histogram_min_peak_, 1);
   evaluation_near_ratio_ = std::clamp(evaluation_near_ratio_, 0.0, 1.0);
   evaluation_far_ratio_ = std::clamp(evaluation_far_ratio_, 0.0, evaluation_near_ratio_);
   control_lookahead_ratio_ = std::clamp(control_lookahead_ratio_, 0.0, evaluation_near_ratio_);
@@ -330,8 +345,101 @@ void LanePerception::imageCallback(
   int left_current = static_cast<int>(std::distance(histogram.begin(), left_peak_it));
   int right_current = static_cast<int>(std::distance(histogram.begin(), right_peak_it));
 
-  const bool left_seed_valid = (left_peak_it != histogram.begin() + midpoint) && (*left_peak_it > 0);
-  const bool right_seed_valid = (right_peak_it != histogram.end()) && (*right_peak_it > 0);
+  bool left_seed_valid =
+    (left_peak_it != histogram.begin() + midpoint) &&
+    (*left_peak_it > 0);
+
+  bool right_seed_valid =
+    (right_peak_it != histogram.end()) &&
+    (*right_peak_it > 0);
+
+  bool left_seed_from_fallback = false;
+  bool right_seed_from_fallback = false;
+
+  // In a tight bend one of the lane boundaries may not reach the lower
+  // histogram band at all, even though it is clearly visible farther ahead.
+  // The old implementation then forced a one-sided estimate.  If a bottom
+  // seed is missing, search a wider mid/upper vertical band before declaring
+  // that boundary absent.  The sliding windows still run bottom-to-top; they
+  // simply keep this fallback x-position until they reach the visible stripe.
+  const int fallback_start_y =
+    std::clamp(
+      static_cast<int>(
+        std::round(
+          height *
+          fallback_histogram_start_ratio_)),
+      0,
+      height - 1);
+
+  const int fallback_end_y =
+    std::clamp(
+      static_cast<int>(
+        std::round(
+          height *
+          fallback_histogram_end_ratio_)),
+      fallback_start_y + 1,
+      height);
+
+  if (!left_seed_valid || !right_seed_valid) {
+    std::vector<int> fallback_histogram(width, 0);
+
+    for (int y = fallback_start_y; y < fallback_end_y; ++y) {
+      const uint8_t * row =
+        birdseye_mask.ptr<uint8_t>(y);
+
+      for (int x = 0; x < width; ++x) {
+        if (row[x] > 0) {
+          ++fallback_histogram[x];
+        }
+      }
+    }
+
+    if (!left_seed_valid) {
+      const auto fallback_left_it =
+        std::max_element(
+          fallback_histogram.begin(),
+          fallback_histogram.begin() + midpoint);
+
+      if (
+        fallback_left_it !=
+        fallback_histogram.begin() + midpoint &&
+        *fallback_left_it >=
+        fallback_histogram_min_peak_)
+      {
+        left_current =
+          static_cast<int>(
+            std::distance(
+              fallback_histogram.begin(),
+              fallback_left_it));
+
+        left_seed_valid = true;
+        left_seed_from_fallback = true;
+      }
+    }
+
+    if (!right_seed_valid) {
+      const auto fallback_right_it =
+        std::max_element(
+          fallback_histogram.begin() + midpoint,
+          fallback_histogram.end());
+
+      if (
+        fallback_right_it !=
+        fallback_histogram.end() &&
+        *fallback_right_it >=
+        fallback_histogram_min_peak_)
+      {
+        right_current =
+          static_cast<int>(
+            std::distance(
+              fallback_histogram.begin(),
+              fallback_right_it));
+
+        right_seed_valid = true;
+        right_seed_from_fallback = true;
+      }
+    }
+  }
 
   // ==========================================================
   // 5. Sliding-window tracing of curved lane boundaries
@@ -350,6 +458,9 @@ void LanePerception::imageCallback(
 
   const int window_height = std::max(1, height / sliding_window_count_);
 
+  int left_windows_hit = 0;
+  int right_windows_hit = 0;
+
   for (int window = 0; window < sliding_window_count_; ++window) {
     const int win_y_high = height - window * window_height;
     const int win_y_low = std::max(0, win_y_high - window_height);
@@ -358,7 +469,8 @@ void LanePerception::imageCallback(
       [&](const int center_x,
           std::vector<cv::Point> & output,
           const cv::Scalar & color,
-          int & new_center)
+          int & new_center,
+          int & windows_hit)
       {
         const int x_low = std::max(0, center_x - sliding_window_margin_px_);
         const int x_high = std::min(width - 1, center_x + sliding_window_margin_px_);
@@ -386,6 +498,7 @@ void LanePerception::imageCallback(
 
         if (count >= sliding_window_minpix_) {
           new_center = static_cast<int>(x_sum / count);
+          ++windows_hit;
         }
       };
 
@@ -394,7 +507,8 @@ void LanePerception::imageCallback(
         left_current,
         left_lane_points,
         cv::Scalar(0, 0, 255),
-        left_current);
+        left_current,
+        left_windows_hit);
     }
 
     if (right_seed_valid) {
@@ -402,7 +516,8 @@ void LanePerception::imageCallback(
         right_current,
         right_lane_points,
         cv::Scalar(255, 0, 0),
-        right_current);
+        right_current,
+        right_windows_hit);
     }
   }
 
@@ -576,10 +691,20 @@ void LanePerception::imageCallback(
         left_lane,
         right_lane);
     } else if (have_lane_width_) {
-      // If both fits exist but their pair geometry is inconsistent,
-      // preserve the boundary with stronger pixel support and reconstruct
-      // the other from the previously learned lane-width polynomial.
-      if (left_lane.support >= right_lane.support) {
+      // If both fits exist but the pair is inconsistent, prefer the boundary
+      // that is observed through more independent sliding windows.  A thick
+      // inner stripe can contain more raw pixels while actually being visible
+      // over a shorter part of the image, so pixel count alone is a poor
+      // confidence measure in tight bends.
+      bool keep_left = false;
+
+      if (left_windows_hit != right_windows_hit) {
+        keep_left = left_windows_hit > right_windows_hit;
+      } else {
+        keep_left = left_lane.support >= right_lane.support;
+      }
+
+      if (keep_left) {
         right_lane =
           reconstruct_right_from_left(
             left_lane);
@@ -790,7 +915,17 @@ void LanePerception::imageCallback(
   bird_text
     << state_text
     << "  L/R px: " << left_lane_points.size()
-    << "/" << right_lane_points.size();
+    << "/" << right_lane_points.size()
+    << "  win=" << left_windows_hit
+    << "/" << right_windows_hit;
+
+  if (left_seed_from_fallback || right_seed_from_fallback) {
+    bird_text
+      << "  seed="
+      << (left_seed_from_fallback ? "F" : "B")
+      << "/"
+      << (right_seed_from_fallback ? "F" : "B");
+  }
 
   cv::putText(
     birdseye_debug,

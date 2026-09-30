@@ -45,15 +45,22 @@ lane_perception:
     min_lane_support_pixels: 90
     histogram_start_ratio: 0.55
 
+    # Tight curves can move one boundary out of the lower histogram band.
+    # If that happens, try to seed the missing side from a mid/upper band
+    # before falling back to a synthetic lane estimate.
+    fallback_histogram_start_ratio: 0.18
+    fallback_histogram_end_ratio: 0.72
+    fallback_histogram_min_peak: 3
+
     # Bird's-eye lane geometry.
     evaluation_near_ratio: 0.86
     evaluation_far_ratio: 0.58
 
     # Smaller y means farther ahead in bird's-eye view.
-    control_lookahead_ratio: 0.42
+    control_lookahead_ratio: 0.38
 
     # Control error = 20% near center + 80% lookahead center.
-    control_near_weight: 0.20
+    control_near_weight: 0.15
 
     # Plausible lane-width range in the current BEV image.
     # The present perspective transform is not metric-calibrated, therefore

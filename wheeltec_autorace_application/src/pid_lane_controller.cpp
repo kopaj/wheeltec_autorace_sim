@@ -12,38 +12,60 @@ namespace wheeltec_autorace_application
 PidLaneController::PidLaneController()
 : Node("pid_lane_controller")
 {
-  error_topic_ = declare_parameter<std::string>("error_topic", "/lane_detection/control_error_normalized");
-  valid_topic_ = declare_parameter<std::string>("valid_topic", "/lane_detection/valid");
-  degraded_topic_ = declare_parameter<std::string>("degraded_topic", "/lane_detection/degraded");
-  cmd_vel_topic_ = declare_parameter<std::string>("cmd_vel_topic", "/cmd_vel");
+  error_topic_ = declare_parameter<std::string>(
+    "error_topic", "/lane_detection/control_error_normalized");
+  valid_topic_ = declare_parameter<std::string>(
+    "valid_topic", "/lane_detection/valid");
+  degraded_topic_ = declare_parameter<std::string>(
+    "degraded_topic", "/lane_detection/degraded");
+  cmd_vel_topic_ = declare_parameter<std::string>(
+    "cmd_vel_topic", "/cmd_vel");
 
-  p_term_topic_ = declare_parameter<std::string>("p_term_topic", "/control/pid/p_term");
-  i_term_topic_ = declare_parameter<std::string>("i_term_topic", "/control/pid/i_term");
-  d_term_topic_ = declare_parameter<std::string>("d_term_topic", "/control/pid/d_term");
-  output_topic_ = declare_parameter<std::string>("output_topic", "/control/pid/output");
-  active_topic_ = declare_parameter<std::string>("active_topic", "/control/pid/active");
-  recovery_active_topic_ = declare_parameter<std::string>("recovery_active_topic", "/control/pid/recovery_active");
+  p_term_topic_ = declare_parameter<std::string>(
+    "p_term_topic", "/control/pid/p_term");
+  i_term_topic_ = declare_parameter<std::string>(
+    "i_term_topic", "/control/pid/i_term");
+  d_term_topic_ = declare_parameter<std::string>(
+    "d_term_topic", "/control/pid/d_term");
+  output_topic_ = declare_parameter<std::string>(
+    "output_topic", "/control/pid/output");
+  active_topic_ = declare_parameter<std::string>(
+    "active_topic", "/control/pid/active");
+  recovery_active_topic_ = declare_parameter<std::string>(
+    "recovery_active_topic", "/control/pid/recovery_active");
 
-  kp_ = declare_parameter<double>("kp", 1.8);
+  kp_ = declare_parameter<double>("kp", 1.25);
   ki_ = declare_parameter<double>("ki", 0.0);
-  kd_ = declare_parameter<double>("kd", 0.12);
-  integral_limit_ = declare_parameter<double>("integral_limit", 0.50);
-  derivative_filter_alpha_ = declare_parameter<double>("derivative_filter_alpha", 0.18);
-  error_deadband_ = declare_parameter<double>("error_deadband", 0.02);
+  kd_ = declare_parameter<double>("kd", 0.18);
+  integral_limit_ = declare_parameter<double>("integral_limit", 0.40);
+  derivative_filter_alpha_ = declare_parameter<double>("derivative_filter_alpha", 0.15);
+  error_filter_alpha_ = declare_parameter<double>("error_filter_alpha", 0.30);
+  error_deadband_ = declare_parameter<double>("error_deadband", 0.018);
+  normal_error_limit_ = declare_parameter<double>("normal_error_limit", 0.45);
+  degraded_error_limit_ = declare_parameter<double>("degraded_error_limit", 0.30);
+  degraded_kp_scale_ = declare_parameter<double>("degraded_kp_scale", 0.70);
 
-  max_angular_z_ = declare_parameter<double>("max_angular_z", 0.85);
-  max_linear_speed_ = declare_parameter<double>("max_linear_speed", 0.12);
-  min_linear_speed_ = declare_parameter<double>("min_linear_speed", 0.045);
-  degraded_linear_speed_ = declare_parameter<double>("degraded_linear_speed", 0.05);
+  max_angular_z_ = declare_parameter<double>("max_angular_z", 0.70);
+  degraded_max_angular_z_ = declare_parameter<double>("degraded_max_angular_z", 0.45);
+  max_linear_speed_ = declare_parameter<double>("max_linear_speed", 0.09);
+  min_linear_speed_ = declare_parameter<double>("min_linear_speed", 0.035);
+  degraded_linear_speed_ = declare_parameter<double>("degraded_linear_speed", 0.03);
   steering_sign_ = declare_parameter<double>("steering_sign", -1.0);
 
-  recovery_enabled_ = declare_parameter<bool>("recovery_enabled", true);
-  recovery_timeout_sec_ = declare_parameter<double>("recovery_timeout_sec", 1.20);
-  recovery_entry_grace_sec_ = declare_parameter<double>("recovery_entry_grace_sec", 0.40);
-  recovery_entry_error_ = declare_parameter<double>("recovery_entry_error", 0.06);
-  recovery_entry_angular_z_ = declare_parameter<double>("recovery_entry_angular_z", 0.12);
-  recovery_linear_speed_ = declare_parameter<double>("recovery_linear_speed", 0.035);
-  recovery_angular_z_ = declare_parameter<double>("recovery_angular_z", 0.60);
+  steering_rise_rate_ = declare_parameter<double>("steering_rise_rate", 2.8);
+  steering_center_rate_ = declare_parameter<double>("steering_center_rate", 4.0);
+  steering_reverse_rate_ = declare_parameter<double>("steering_reverse_rate", 1.2);
+
+  // Recovery is intentionally OFF by default in this tuning step. The
+  // previous fixed-angle recovery could keep turning after the perception
+  // had already started to reacquire the track and amplified overshoot.
+  recovery_enabled_ = declare_parameter<bool>("recovery_enabled", false);
+  recovery_timeout_sec_ = declare_parameter<double>("recovery_timeout_sec", 0.60);
+  recovery_entry_grace_sec_ = declare_parameter<double>("recovery_entry_grace_sec", 0.25);
+  recovery_entry_error_ = declare_parameter<double>("recovery_entry_error", 0.10);
+  recovery_entry_angular_z_ = declare_parameter<double>("recovery_entry_angular_z", 0.20);
+  recovery_linear_speed_ = declare_parameter<double>("recovery_linear_speed", 0.025);
+  recovery_angular_z_ = declare_parameter<double>("recovery_angular_z", 0.35);
 
   control_frequency_hz_ = declare_parameter<double>("control_frequency_hz", 20.0);
   perception_timeout_sec_ = declare_parameter<double>("perception_timeout_sec", 0.25);
@@ -51,11 +73,23 @@ PidLaneController::PidLaneController()
 
   control_frequency_hz_ = std::max(control_frequency_hz_, 1.0);
   derivative_filter_alpha_ = std::clamp(derivative_filter_alpha_, 0.0, 1.0);
+  error_filter_alpha_ = std::clamp(error_filter_alpha_, 0.0, 1.0);
   error_deadband_ = std::max(error_deadband_, 0.0);
+  normal_error_limit_ = std::clamp(std::abs(normal_error_limit_), 0.01, 1.0);
+  degraded_error_limit_ = std::clamp(std::abs(degraded_error_limit_), 0.01, normal_error_limit_);
+  degraded_kp_scale_ = std::clamp(degraded_kp_scale_, 0.0, 1.0);
+
   max_angular_z_ = std::max(std::abs(max_angular_z_), 1e-6);
+  degraded_max_angular_z_ =
+    std::clamp(std::abs(degraded_max_angular_z_), 1e-6, max_angular_z_);
   max_linear_speed_ = std::max(max_linear_speed_, 0.0);
   min_linear_speed_ = std::clamp(min_linear_speed_, 0.0, max_linear_speed_);
   degraded_linear_speed_ = std::clamp(degraded_linear_speed_, 0.0, max_linear_speed_);
+
+  steering_rise_rate_ = std::max(steering_rise_rate_, 0.0);
+  steering_center_rate_ = std::max(steering_center_rate_, 0.0);
+  steering_reverse_rate_ = std::max(steering_reverse_rate_, 0.0);
+
   recovery_timeout_sec_ = std::max(recovery_timeout_sec_, 0.0);
   recovery_entry_grace_sec_ = std::max(recovery_entry_grace_sec_, 0.0);
   recovery_entry_error_ = std::max(recovery_entry_error_, 0.0);
@@ -106,9 +140,9 @@ PidLaneController::PidLaneController()
 
   RCLCPP_INFO(
     get_logger(),
-    "PID lane controller started %s. Kp=%.3f Ki=%.3f Kd=%.3f recovery=%s",
+    "PID controller started %s. Kp=%.2f Kd=%.2f max_w=%.2f recovery=%s",
     enabled_ ? "ENABLED" : "DISABLED",
-    kp_, ki_, kd_, recovery_enabled_ ? "ON" : "OFF");
+    kp_, kd_, max_angular_z_, recovery_enabled_ ? "ON" : "OFF");
 }
 
 void PidLaneController::errorCallback(
@@ -138,6 +172,8 @@ void PidLaneController::enableCallback(
   enabled_ = request->data;
   resetPid();
   recovery_active_ = false;
+  last_commanded_angular_z_ = 0.0;
+  previous_lane_degraded_ = false;
   publishRecoveryState(false);
 
   if (enabled_) {
@@ -161,7 +197,9 @@ void PidLaneController::resetPid()
 {
   integral_ = 0.0;
   previous_error_ = 0.0;
+  filtered_error_ = 0.0;
   filtered_derivative_ = 0.0;
+  have_filtered_error_ = false;
   have_previous_error_ = false;
 }
 
@@ -210,6 +248,38 @@ void PidLaneController::publishRecoveryState(const bool active)
   recovery_active_pub_->publish(msg);
 }
 
+double PidLaneController::limitSteeringRate(
+  const double target,
+  const double dt)
+{
+  const double current = last_commanded_angular_z_;
+
+  double rate = steering_rise_rate_;
+
+  const bool same_sign = target * current >= 0.0;
+  const bool moving_toward_zero =
+    same_sign && std::abs(target) < std::abs(current);
+
+  if (moving_toward_zero) {
+    rate = steering_center_rate_;
+  } else if (!same_sign && std::abs(current) > 1e-4) {
+    // First unwind the old steering direction. Crossing immediately to a
+    // large opposite command is the main source of post-corner snake motion.
+    const double max_delta = steering_center_rate_ * dt;
+    const double next =
+      current > 0.0 ? std::max(0.0, current - max_delta) : std::min(0.0, current + max_delta);
+    last_commanded_angular_z_ = next;
+    return next;
+  } else if (!same_sign) {
+    rate = steering_reverse_rate_;
+  }
+
+  const double max_delta = rate * dt;
+  const double next = std::clamp(target, current - max_delta, current + max_delta);
+  last_commanded_angular_z_ = next;
+  return next;
+}
+
 void PidLaneController::controlLoop()
 {
   const auto now = SteadyClock::now();
@@ -230,10 +300,6 @@ void PidLaneController::controlLoop()
     perception_stale = error_age > perception_timeout_sec_;
   }
 
-  // ==========================================================
-  // Normal closed-loop tracking
-  // ==========================================================
-
   if (lane_valid_ && !perception_stale) {
     if (recovery_active_) {
       recovery_active_ = false;
@@ -245,12 +311,39 @@ void PidLaneController::controlLoop()
       dt = 1.0 / control_frequency_hz_;
     }
 
-    double error = latest_error_;
+    // Smooth the image-space control error before the PID sees it. This is
+    // deliberately mild: enough to suppress one-frame jumps, but still fast
+    // enough for the tight first corner.
+    if (!have_filtered_error_) {
+      filtered_error_ = latest_error_;
+      have_filtered_error_ = true;
+    } else {
+      filtered_error_ =
+        error_filter_alpha_ * latest_error_ +
+        (1.0 - error_filter_alpha_) * filtered_error_;
+    }
+
+    // Changing FULL <-> DEGRADED can cause a large derivative kick because
+    // an estimated boundary moves the centerline slightly. Reset only the D
+    // memory on that transition; keep the filtered steering objective.
+    if (lane_degraded_ != previous_lane_degraded_) {
+      filtered_derivative_ = 0.0;
+      have_previous_error_ = false;
+      previous_lane_degraded_ = lane_degraded_;
+    }
+
+    const double error_limit =
+      lane_degraded_ ? degraded_error_limit_ : normal_error_limit_;
+
+    double error = std::clamp(filtered_error_, -error_limit, error_limit);
     if (std::abs(error) < error_deadband_) {
       error = 0.0;
     }
 
-    const double p_term = kp_ * error;
+    const double effective_kp =
+      lane_degraded_ ? kp_ * degraded_kp_scale_ : kp_;
+
+    const double p_term = effective_kp * error;
 
     integral_ += error * dt;
     integral_ = std::clamp(integral_, -integral_limit_, integral_limit_);
@@ -270,14 +363,18 @@ void PidLaneController::controlLoop()
     previous_error_ = error;
     have_previous_error_ = true;
 
+    const double active_max_angular =
+      lane_degraded_ ? degraded_max_angular_z_ : max_angular_z_;
+
     const double raw_output = p_term + i_term + d_term;
     const double limited_output =
-      std::clamp(raw_output, -max_angular_z_, max_angular_z_);
+      std::clamp(raw_output, -active_max_angular, active_max_angular);
 
-    const double angular_command = steering_sign_ * limited_output;
+    const double target_angular = steering_sign_ * limited_output;
+    const double angular_command = limitSteeringRate(target_angular, dt);
 
     const double steering_ratio =
-      std::clamp(std::abs(limited_output) / max_angular_z_, 0.0, 1.0);
+      std::clamp(std::abs(angular_command) / max_angular_z_, 0.0, 1.0);
 
     double commanded_speed =
       max_linear_speed_ -
@@ -291,17 +388,16 @@ void PidLaneController::controlLoop()
     publishDebug(p_term, i_term, d_term, angular_command, true);
     publishRecoveryState(false);
 
-    last_valid_error_ = latest_error_;
+    last_valid_error_ = error;
     last_tracking_angular_z_ = angular_command;
     last_valid_tracking_time_ = now;
     have_tracking_history_ = true;
     return;
   }
 
-  // ==========================================================
-  // Bounded curve-recovery state
-  // ==========================================================
-
+  // Optional bounded recovery. It is disabled in the default YAML while the
+  // closed-loop controller is being tuned; keeping the code here lets us
+  // re-enable it later in a controlled experiment.
   const double since_last_valid =
     std::chrono::duration<double>(now - last_valid_tracking_time_).count();
 
@@ -313,7 +409,6 @@ void PidLaneController::controlLoop()
 
     if (recent_loss && was_turning) {
       double turn_reference = last_tracking_angular_z_;
-
       if (std::abs(turn_reference) < 1e-6) {
         turn_reference = steering_sign_ * last_valid_error_;
       }
@@ -323,11 +418,6 @@ void PidLaneController::controlLoop()
         recovery_start_time_ = now;
         recovery_active_ = true;
         resetPid();
-
-        RCLCPP_WARN(
-          get_logger(),
-          "Lane lost during turn -> RECOVERY mode, sign=%+.0f",
-          recovery_turn_sign_);
       }
     }
   }
@@ -337,7 +427,8 @@ void PidLaneController::controlLoop()
       std::chrono::duration<double>(now - recovery_start_time_).count();
 
     if (recovery_age <= recovery_timeout_sec_) {
-      const double angular = recovery_turn_sign_ * recovery_angular_z_;
+      const double target = recovery_turn_sign_ * recovery_angular_z_;
+      const double angular = limitSteeringRate(target, std::max(dt, 1.0 / control_frequency_hz_));
       publishCommand(recovery_linear_speed_, angular);
       publishDebug(0.0, 0.0, 0.0, angular, true);
       publishRecoveryState(true);
@@ -346,11 +437,10 @@ void PidLaneController::controlLoop()
 
     recovery_active_ = false;
     publishRecoveryState(false);
-    RCLCPP_WARN(get_logger(), "RECOVERY timeout -> STOP");
   }
 
-  // No safe recovery context, or recovery timed out.
   resetPid();
+  last_commanded_angular_z_ = 0.0;
   publishCommand(0.0, 0.0);
   publishDebug(0.0, 0.0, 0.0, 0.0, false);
   publishRecoveryState(false);

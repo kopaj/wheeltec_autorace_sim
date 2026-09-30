@@ -152,6 +152,8 @@ def main():
     )
 
 
+
+
     # --------------------------------------------------------
     # Create output image
     # --------------------------------------------------------
@@ -163,6 +165,18 @@ def main():
 
     # Both detected lanes become pure white.
     output[lane_mask > 0] = LANE_BGR
+
+    height, width = output.shape[:2]
+
+    border_ratio = 0.005
+    border = int(min(width, height) * border_ratio)
+
+    background_bgr = (32, 0, 24)
+
+    output[:border, :] = background_bgr
+    output[-border:, :] = background_bgr
+    output[:, :border] = background_bgr
+    output[:, -border:] = background_bgr
 
 
     # --------------------------------------------------------

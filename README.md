@@ -1,12 +1,10 @@
 # Wheeltec AutoRace Simulation
 
-A projekt célja egy ROS 2 Humble és Gazebo Fortress alapú szimulációs környezet létrehozása a Wheeltec (Roboworks) robothoz. A robot egy kamerával érzékeli a pálya két fehér szélét, ezekből megbecsüli a sáv középvonalát, majd egy PID szabályozó segítségével generálja a haladási és kormányzási parancsokat.
+ROS 2 Humble és Gazebo Fortress alapú szimulációs környezet Wheeltec / Roboworks robot autonóm sávtartásának fejlesztéséhez.
 
-A fejlesztés jelenleg szimulációban fut, de a csomagstruktúra és a fontosabb paraméterek úgy vannak kialakítva, hogy később a vezérlés a fizikai robotra is átvihető legyen.
+A projekt célja egy kameraalapú pályakövető rendszer megvalósítása, amely egy 2D-s, fehér vonalakkal határolt tesztpályán képes a robotot autonóm módon végigvezetni. A jelenlegi verzióban a lane perception és a PID vezérlés már egy teljes kört sikeresen teljesített a generált tesztpályán.
 
-## Környezet
-
-A projekt az alábbi környezetre készült:
+## Fejlesztési környezet
 
 - Ubuntu 22.04 LTS
 - ROS 2 Humble
@@ -16,115 +14,144 @@ A projekt az alábbi környezetre készült:
 - `cv_bridge`
 - `rqt_image_view`
 
-## Csomagok
+## ROS 2 csomagok
 
 ### `wheeltec_autorace_description`
 
-A Wheeltec robot modelljei, szenzorai, mesh fájljai és a pálya modellje található itt.
+A Wheeltec / Roboworks robotmodell, szenzorok, mesh-ek és a pályamodell erőforrásai.
 
 ### `wheeltec_autorace_gazebo`
 
-A Gazebo world fájlokat tartalmazza. A projektben használt versenypálya innen kerül betöltésre.
+A Gazebo világfájlok és a szimulációs környezet.
 
 ### `wheeltec_autorace_bringup`
 
-A szimuláció indításához szükséges ROS 2 launch fájlokat és a ROS–Gazebo bridge konfigurációját tartalmazza.
+A szimuláció indításához szükséges ROS 2 launch fájlok és a ROS-Gazebo bridge-ek.
+
+A `simulation.launch.py` jelenleg elindítja:
+
+- a Gazebo Fortress szimulációt,
+- a Wheeltec / Roboworks modellt,
+- a szükséges ROS-Gazebo bridge-eket,
+- a `lane_perception` node-ot a hozzá tartozó YAML konfigurációval,
+- az `rqt_image_view` alkalmazást.
+
+A PID controller egyelőre külön indul, hogy a vezérlő hangolása a szimulációtól függetlenül végezhető legyen.
 
 ### `wheeltec_autorace_application`
 
-A kameraképet feldolgozó sávfelismerés és a pályakövetéshez használt vezérlési algoritmusok találhatók ebben a csomagban.
+A kamera feldolgozásáért, sávfelismerésért és a pályakövető vezérlésért felelős node-ok.
 
-Jelenleg két fontos node tartozik ide:
+Jelenleg:
 
 - `lane_perception`
 - `pid_lane_controller`
 
----
-
 ## Lane perception pipeline
 
-A sávfelismerés bemenete a robot RGB kamerájának képe:
+A jelenlegi vezérléshez használt sávfelismerés nem kizárólag Hough-egyenesekből dolgozik. A Hough-transzformáció megmaradt diagnosztikai célra, a tényleges pályakövetés viszont bird's-eye nézetben történik.
+
+A fő feldolgozási lánc:
 
 ```text
 /camera/image_raw
+        |
+        v
+HSV alapú fehér sávszegmentálás
+        |
+        v
+ROI + perspektívatranszformáció
+        |
+        v
+Bird's-eye view
+        |
+        v
+Hisztogram alapú kezdőpont-keresés
+        |
+        v
+Sliding window sávkövetés
+        |
+        v
+Bal és jobb sáv görbeillesztése
+        |
+        v
+Sávközép + előretekintési pont
+        |
+        v
+control_error_normalized
+        |
+        v
+PID controller
+        |
+        v
+/cmd_vel
+        |
+        v
+Ackermann steering
 ```
 
-A jelenlegi feldolgozási lánc röviden:
+A perception külön debug képeket is publikál, így futás közben ellenőrizhető a szegmentálás, a bird's-eye transzformáció, a sliding window keresés és a becsült középvonal.
+
+## Generált tesztpálya
+
+A pálya már nem kézzel rajzolt textúrából készül. A projektben található Python script reprodukálható módon generálja a tesztpályát.
+
+A jelenlegi tesztpálya főbb adatai:
+
+- fizikai méret: `9.1 x 9.1 m`
+- sávszélesség: kb. `0.74 m`
+- fehér vonalvastagság: `0.05 m`
+- kanyarsugár: `0.85 m`
+- több, egymástól egyenes szakasszal elválasztott 90 fokos irányváltás
+
+A pálya tervezésénél figyelembe lett véve a Wheeltec Ackermann modell kormányzási korlátja:
 
 ```text
-RGB kamerakép
-    |
-    v
-HSV színtér + fehér sávok maszkolása
-    |
-    v
-morfológiai szűrés
-    |
-    v
-perspektíva-transzformáció (bird's-eye view)
-    |
-    v
-alsó képrész hisztogramja
-    |
-    v
-sliding-window sávkeresés
-    |
-    v
-2. fokú polinom illesztése a bal és jobb sávra
-    |
-    v
-sávközép + előretekintési pont
-    |
-    v
-normalizált vezérlési hibajel
-    |
-    v
-PID vezérlő
-    |
-    v
-/cmd_vel
+steering_limit = 0.4 rad
+wheel_base     = 0.262 m
 ```
 
-A Canny élkeresés és a Hough-transzformáció továbbra is része a perception node-nak, de jelenleg főleg diagnosztikai és vizualizációs célra használjuk. A vezérléshez a bird's-eye nézetből, sliding-window módszerrel követett görbült sávhatárok adják a középvonalat. Ez az élesebb kanyaroknál stabilabb, mint amikor a teljes sávhatárt egyetlen egyenessel próbáljuk közelíteni.
+A generált pálya célja, hogy a robotnak ne kelljen minden kanyarban a fizikai kormányzási limit közelében haladnia.
 
-Ha az egyik sávhatár rövid időre nem használható, a perception az utoljára ismert sávgeometria alapján becslést készít. Ha a sávkövetés teljesen elveszik, a PID vezérlő recovery módba tud váltani, majd ha a sáv újra felismerhető, visszatér a normál követéshez.
+### Pálya újragenerálása
 
-A jelenlegi verzió az egyenes és egyszerűbb kanyargós szakaszokat már végig tudja követni. Az összetettebb, egymást gyorsan követő kanyarok robusztus kezelése még további finomhangolást igényel.
-
----
-
-# Telepítés és build
-
-## 1. Workspace létrehozása
-
-Ha még nincs workspace:
+A repository gyökeréből:
 
 ```bash
-mkdir -p ~/wheeltec_autorace_ws/src
-cd ~/wheeltec_autorace_ws/src
+cd ~/wheeltec_autorace_ws/src/wheeltec_autorace_sim
+
+python3 tools/generate_multicorner_track.py \
+  --output \
+  wheeltec_autorace_description/models/racetrack/materials/textures/course.png \
+  --debug-output \
+  /tmp/course_multicorner_debug.png
 ```
 
-A repository klónozása:
+A debug változat megnyitható:
 
 ```bash
-git clone https://github.com/kopaj/wheeltec_autorace_sim.git
+xdg-open /tmp/course_multicorner_debug.png
 ```
 
-Ha a repository már megvan, ez a lépés kihagyható.
+A Gazebo a `course.png` fájlt használja.
 
-## 2. ROS 2 környezet betöltése
+## Build
+
+Lépj a workspace gyökerébe:
+
+```bash
+cd ~/wheeltec_autorace_ws
+```
+
+Töltsd be a ROS 2 Humble környezetet:
 
 ```bash
 source /opt/ros/humble/setup.bash
 ```
 
-## 3. Függőségek telepítése
-
-A workspace gyökeréből:
+A függőségek telepítése:
 
 ```bash
-cd ~/wheeltec_autorace_ws
-
 rosdep install \
   --from-paths src \
   --ignore-src \
@@ -133,37 +160,17 @@ rosdep install \
   --rosdistro humble
 ```
 
-Ha szükséges, az alapvető képfeldolgozó és megjelenítő csomagok külön is telepíthetők:
+Build:
 
 ```bash
-sudo apt update
-sudo apt install -y \
-  ros-humble-cv-bridge \
-  ros-humble-rqt-image-view \
-  libopencv-dev
-```
-
-## 4. Build
-
-```bash
-cd ~/wheeltec_autorace_ws
-
-source /opt/ros/humble/setup.bash
-
 colcon build --symlink-install
 ```
 
-Fejlesztés közben, ha csak az application és bringup csomag változott, gyorsabb lehet:
+A workspace betöltése:
 
 ```bash
-colcon build \
-  --symlink-install \
-  --packages-select \
-  wheeltec_autorace_application \
-  wheeltec_autorace_bringup
+source ~/wheeltec_autorace_ws/install/setup.bash
 ```
-
-## 5. Workspace source-olása
 
 Minden új terminálban szükséges:
 
@@ -172,126 +179,52 @@ source /opt/ros/humble/setup.bash
 source ~/wheeltec_autorace_ws/install/setup.bash
 ```
 
-Ha ez kimarad, a saját csomagok vagy executable-ök nem biztos, hogy elérhetők lesznek.
+## Szimuláció indítása
 
----
-
-# A projekt indítása lépésről lépésre
-
-Fejlesztés közben érdemes a fő komponenseket külön terminálokban futtatni. Így könnyebben látható, hogy melyik node mit ír ki és hol jelenik meg egy esetleges hiba.
-
-> Ha a saját `simulation.launch.py` verziód már automatikusan elindítja a `lane_perception` vagy `pid_lane_controller` node-ot is, az adott node-ot ne indítsd el még egyszer külön terminálban. Ezt a `ros2 node list` paranccsal tudod ellenőrizni.
-
-## Terminál 1 – Gazebo szimuláció
+A teljes szimuláció:
 
 ```bash
-source /opt/ros/humble/setup.bash
-source ~/wheeltec_autorace_ws/install/setup.bash
-
-ros2 launch wheeltec_autorace_bringup simulation.launch.py
+ros2 launch \
+  wheeltec_autorace_bringup \
+  simulation.launch.py
 ```
 
-A launch elindítja a Gazebo környezetet, betölti a Wheeltec modellt és létrehozza a szükséges ROS–Gazebo kapcsolatokat.
+A launch jelenleg automatikusan elindítja a Gazebót, a lane perception node-ot és az `rqt_image_view`-t is.
 
-A robot vezérlési parancsa ROS oldalon:
-
-```text
-/cmd_vel
-```
-
-A kamera fő ROS topicja:
+Az `rqt_image_view` listájából fejlesztés közben főleg ezeket érdemes figyelni:
 
 ```text
 /camera/image_raw
-```
-
-## Terminál 2 – Lane perception
-
-Először ellenőrizhető, hogy már fut-e:
-
-```bash
-ros2 node list | grep lane_perception
-```
-
-Ha nincs találat, indítsd el külön:
-
-```bash
-source /opt/ros/humble/setup.bash
-source ~/wheeltec_autorace_ws/install/setup.bash
-
-ros2 run \
-  wheeltec_autorace_application \
-  lane_perception \
-  --ros-args \
-  --params-file \
-  $(ros2 pkg prefix wheeltec_autorace_application)/share/wheeltec_autorace_application/config/lane_perception.yaml
-```
-
-Néhány fontos perception topic:
-
-```text
 /lane_detection/debug_image
 /lane_detection/white_mask
+/lane_detection/edges
 /lane_detection/birdseye_mask
 /lane_detection/birdseye_debug
-/lane_detection/valid
-/lane_detection/degraded
-/lane_detection/cross_track_error_normalized
-/lane_detection/control_error_normalized
-/lane_detection/heading_error
 ```
 
-A vezérlés szempontjából a legfontosabb jel jelenleg:
+## PID controller indítása
 
-```text
-/lane_detection/control_error_normalized
-```
+A PID controller jelenleg külön terminálból indul.
 
-## Terminál 3 – `rqt_image_view`
+Új terminál:
 
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/wheeltec_autorace_ws/install/setup.bash
-
-rqt_image_view
 ```
 
-Első ellenőrzéshez érdemes ezeket a topicokat végignézni:
-
-```text
-/camera/image_raw
-/lane_detection/white_mask
-/lane_detection/debug_image
-/lane_detection/birdseye_debug
-```
-
-A `birdseye_debug` mutatja a sliding-window keresést és a vezérléshez használt sávgeometriát, ezért PID hangolásnál ez a leghasznosabb nézet.
-
-## Terminál 4 – PID sávtartó vezérlő
-
-Először ellenőrizd, hogy már fut-e:
+Controller:
 
 ```bash
-ros2 node list | grep pid_lane_controller
-```
-
-Ha nem fut:
-
-```bash
-source /opt/ros/humble/setup.bash
-source ~/wheeltec_autorace_ws/install/setup.bash
-
 ros2 run \
   wheeltec_autorace_application \
   pid_lane_controller \
   --ros-args \
   --params-file \
-  $(ros2 pkg prefix wheeltec_autorace_application)/share/wheeltec_autorace_application/config/pid_lane_controller.yaml
+  ~/wheeltec_autorace_ws/install/wheeltec_autorace_application/share/wheeltec_autorace_application/config/pid_lane_controller.yaml
 ```
 
-A PID biztonsági okból alapértelmezetten nem indítja el rögtön a robotot.
-
-Bekapcsolás:
+Engedélyezés:
 
 ```bash
 ros2 service call \
@@ -300,7 +233,7 @@ ros2 service call \
   "{data: true}"
 ```
 
-Kikapcsolás és megállítás:
+Leállítás:
 
 ```bash
 ros2 service call \
@@ -309,126 +242,58 @@ ros2 service call \
   "{data: false}"
 ```
 
-A PID fontosabb debug topicjai:
+A letiltás nullás sebességparancsot küld a robotnak.
+
+## Hasznos topicok
+
+Perception:
 
 ```text
-/control/pid/p_term
-/control/pid/i_term
-/control/pid/d_term
+/camera/image_raw
+/lane_detection/valid
+/lane_detection/degraded
+/lane_detection/cross_track_error_normalized
+/lane_detection/control_error_normalized
+/lane_detection/heading_error
+/lane_detection/debug_image
+/lane_detection/birdseye_debug
+```
+
+Vezérlés:
+
+```text
 /control/pid/output
-/control/pid/active
-/control/pid/recovery_active
+/cmd_vel
 ```
 
-A ténylegesen kiküldött sebesség- és kormányparancs megfigyelhető:
-
-```bash
-ros2 topic echo /cmd_vel
-```
-
----
-
-# Gyors indítás
-
-Ha a projekt már egyszer le lett fordítva, a szokásos fejlesztői indítás röviden:
-
-### 1. Szimuláció
-
-```bash
-source /opt/ros/humble/setup.bash
-source ~/wheeltec_autorace_ws/install/setup.bash
-ros2 launch wheeltec_autorace_bringup simulation.launch.py
-```
-
-### 2. Lane perception, ha a launch nem indította el
-
-```bash
-source /opt/ros/humble/setup.bash
-source ~/wheeltec_autorace_ws/install/setup.bash
-ros2 run wheeltec_autorace_application lane_perception --ros-args \
-  --params-file $(ros2 pkg prefix wheeltec_autorace_application)/share/wheeltec_autorace_application/config/lane_perception.yaml
-```
-
-### 3. Képmegjelenítés
-
-```bash
-rqt_image_view
-```
-
-### 4. PID controller, ha a launch nem indította el
-
-```bash
-source /opt/ros/humble/setup.bash
-source ~/wheeltec_autorace_ws/install/setup.bash
-ros2 run wheeltec_autorace_application pid_lane_controller --ros-args \
-  --params-file $(ros2 pkg prefix wheeltec_autorace_application)/share/wheeltec_autorace_application/config/pid_lane_controller.yaml
-```
-
-### 5. Autonóm követés engedélyezése
-
-```bash
-ros2 service call /pid_lane_controller/enable \
-  std_srvs/srv/SetBool "{data: true}"
-```
-
----
-
-# Hasznos ellenőrző parancsok
-
-Futó node-ok:
-
-```bash
-ros2 node list
-```
-
-Lane perception topicok:
-
-```bash
-ros2 topic list | grep lane_detection
-```
-
-PID topicok:
-
-```bash
-ros2 topic list | grep control/pid
-```
-
-A perception érvényességének figyelése:
-
-```bash
-ros2 topic echo /lane_detection/valid
-```
-
-A vezérlési hibajel figyelése:
+Például:
 
 ```bash
 ros2 topic echo /lane_detection/control_error_normalized
 ```
 
-A kiküldött mozgásparancs:
+```bash
+ros2 topic echo /control/pid/output
+```
 
 ```bash
 ros2 topic echo /cmd_vel
 ```
 
----
+## Jelenlegi állapot
 
-# Fejlesztési állapot
+A projekt jelenlegi mérföldkövei:
 
-Jelenleg működik:
-
-- Wheeltec robot Gazebo Fortress környezetben
-- egyedi, textúrázott 2D versenypálya
-- RGB kamera és ROS 2 image bridge
-- fehér sávok HSV alapú szegmentálása
+- Wheeltec / Roboworks robotmodell Gazebo Fortress alatt
+- Ackermann steering és `/cmd_vel` vezérlés
+- RGB kamera ROS 2 bridge
+- generált, kinematikai korlátokhoz igazított 2D tesztpálya
+- HSV alapú sávszegmentálás
 - Canny + Hough diagnosztikai feldolgozás
-- bird's-eye perspektíva-transzformáció
-- sliding-window alapú sávkövetés
-- másodfokú polinom sávmodell
-- normalizált sávközép- és lookahead hibajel
-- PID alapú sávtartó vezérlés
-- dinamikus sebességszabályozás
-- részleges sávvesztés kezelése
-- rövid idejű recovery mód
+- bird's-eye nézet
+- sliding window alapú sávkövetés
+- görbealapú sávközép-becslés
+- PID alapú autonóm sávtartás
+- sikeres teljes autonóm kör a generált tesztpályán
 
-A következő fejlesztési lépés a komplexebb kanyarkombinációk robusztusabb kezelése, majd a PID vezérlő mérési eredményeinek rögzítése és összehasonlítása egy Pure Pursuit alapú vezérlővel.
+A következő fejlesztési lépések között szerepel a PID további kiértékelése, valamint a Pure Pursuit vezérlő implementálása és összehasonlítása.

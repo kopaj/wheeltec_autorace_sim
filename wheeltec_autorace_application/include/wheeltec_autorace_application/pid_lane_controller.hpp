@@ -40,6 +40,8 @@ private:
     bool active);
   void publishRecoveryState(bool active);
 
+  double limitSteeringRate(double target, double dt);
+
   // Subscribers
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr error_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr valid_sub_;
@@ -76,14 +78,26 @@ private:
   double kd_;
   double integral_limit_;
   double derivative_filter_alpha_;
+  double error_filter_alpha_;
   double error_deadband_;
+  double normal_error_limit_;
+  double degraded_error_limit_;
+  double degraded_kp_scale_;
 
   // Vehicle command parameters
   double max_angular_z_;
+  double degraded_max_angular_z_;
   double max_linear_speed_;
   double min_linear_speed_;
   double degraded_linear_speed_;
   double steering_sign_;
+
+  // Steering-rate limiting.
+  // Build steering into a curve, return quickly toward zero, but cross zero
+  // more slowly so a single noisy frame cannot start a snake motion.
+  double steering_rise_rate_;
+  double steering_center_rate_;
+  double steering_reverse_rate_;
 
   // Recovery state parameters
   bool recovery_enabled_;
@@ -101,15 +115,19 @@ private:
   bool enabled_{false};
   bool lane_valid_{false};
   bool lane_degraded_{false};
+  bool previous_lane_degraded_{false};
   bool have_error_{false};
+  bool have_filtered_error_{false};
   bool have_previous_error_{false};
   bool have_tracking_history_{false};
   bool recovery_active_{false};
 
   double latest_error_{0.0};
+  double filtered_error_{0.0};
   double previous_error_{0.0};
   double integral_{0.0};
   double filtered_derivative_{0.0};
+  double last_commanded_angular_z_{0.0};
   double last_valid_error_{0.0};
   double last_tracking_angular_z_{0.0};
   double recovery_turn_sign_{0.0};

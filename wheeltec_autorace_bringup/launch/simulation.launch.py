@@ -12,6 +12,16 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
 
+    application_package = get_package_share_directory(
+        'wheeltec_autorace_application'
+    )
+
+    lane_perception_config = os.path.join(
+        application_package,
+        'config',
+        'lane_perception.yaml'
+    )
+
     description_package = get_package_share_directory(
         'wheeltec_autorace_description'
     )
@@ -122,10 +132,32 @@ def generate_launch_description():
         ]
     )
 
+    lane_perception = Node(
+        package='wheeltec_autorace_application',
+        executable='lane_perception',
+        name='lane_perception',
+        output='screen',
+        parameters=[
+            lane_perception_config,
+            {
+                'use_sim_time': True
+            }
+        ]
+    )
+
+    rqt_image_view = Node(
+        package='rqt_image_view',
+        executable='rqt_image_view',
+        name='lane_perception_image_view',
+        output='screen'
+    )
+
     return LaunchDescription([
         gazebo_resource_path,
         gazebo,
         cmd_vel_bridge,
         camera_image_bridge,
-        camera_info_bridge
+        camera_info_bridge,
+        lane_perception,
+        rqt_image_view
     ])

@@ -98,6 +98,9 @@ private:
   int sliding_window_minpix_;
   int min_lane_support_pixels_;
   double histogram_start_ratio_;
+  double fallback_histogram_start_ratio_;
+  double fallback_histogram_end_ratio_;
+  int fallback_histogram_min_peak_;
 
   // Lane geometry in bird's-eye image.
   double evaluation_near_ratio_;
