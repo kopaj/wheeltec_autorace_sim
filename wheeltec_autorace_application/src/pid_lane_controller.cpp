@@ -34,27 +34,27 @@ PidLaneController::PidLaneController()
   recovery_active_topic_ = declare_parameter<std::string>(
     "recovery_active_topic", "/control/pid/recovery_active");
 
-  kp_ = declare_parameter<double>("kp", 1.25);
+  kp_ = declare_parameter<double>("kp", 1.75);
   ki_ = declare_parameter<double>("ki", 0.0);
-  kd_ = declare_parameter<double>("kd", 0.18);
+  kd_ = declare_parameter<double>("kd", 0.28);
   integral_limit_ = declare_parameter<double>("integral_limit", 0.40);
-  derivative_filter_alpha_ = declare_parameter<double>("derivative_filter_alpha", 0.15);
-  error_filter_alpha_ = declare_parameter<double>("error_filter_alpha", 0.30);
-  error_deadband_ = declare_parameter<double>("error_deadband", 0.018);
+  derivative_filter_alpha_ = declare_parameter<double>("derivative_filter_alpha", 0.18);
+  error_filter_alpha_ = declare_parameter<double>("error_filter_alpha", 0.40);
+  error_deadband_ = declare_parameter<double>("error_deadband", 0.012);
   normal_error_limit_ = declare_parameter<double>("normal_error_limit", 0.45);
-  degraded_error_limit_ = declare_parameter<double>("degraded_error_limit", 0.30);
-  degraded_kp_scale_ = declare_parameter<double>("degraded_kp_scale", 0.70);
+  degraded_error_limit_ = declare_parameter<double>("degraded_error_limit", 0.25);
+  degraded_kp_scale_ = declare_parameter<double>("degraded_kp_scale", 0.60);
 
   max_angular_z_ = declare_parameter<double>("max_angular_z", 0.70);
-  degraded_max_angular_z_ = declare_parameter<double>("degraded_max_angular_z", 0.45);
-  max_linear_speed_ = declare_parameter<double>("max_linear_speed", 0.09);
-  min_linear_speed_ = declare_parameter<double>("min_linear_speed", 0.035);
-  degraded_linear_speed_ = declare_parameter<double>("degraded_linear_speed", 0.03);
+  degraded_max_angular_z_ = declare_parameter<double>("degraded_max_angular_z", 0.40);
+  max_linear_speed_ = declare_parameter<double>("max_linear_speed", 0.50);
+  min_linear_speed_ = declare_parameter<double>("min_linear_speed", 0.16);
+  degraded_linear_speed_ = declare_parameter<double>("degraded_linear_speed", 0.12);
   steering_sign_ = declare_parameter<double>("steering_sign", -1.0);
 
-  steering_rise_rate_ = declare_parameter<double>("steering_rise_rate", 2.8);
-  steering_center_rate_ = declare_parameter<double>("steering_center_rate", 4.0);
-  steering_reverse_rate_ = declare_parameter<double>("steering_reverse_rate", 1.2);
+  steering_rise_rate_ = declare_parameter<double>("steering_rise_rate", 4.0);
+  steering_center_rate_ = declare_parameter<double>("steering_center_rate", 5.0);
+  steering_reverse_rate_ = declare_parameter<double>("steering_reverse_rate", 1.4);
 
   // Recovery is intentionally OFF by default in this tuning step. The
   // previous fixed-angle recovery could keep turning after the perception
@@ -67,8 +67,8 @@ PidLaneController::PidLaneController()
   recovery_linear_speed_ = declare_parameter<double>("recovery_linear_speed", 0.025);
   recovery_angular_z_ = declare_parameter<double>("recovery_angular_z", 0.35);
 
-  control_frequency_hz_ = declare_parameter<double>("control_frequency_hz", 20.0);
-  perception_timeout_sec_ = declare_parameter<double>("perception_timeout_sec", 0.25);
+  control_frequency_hz_ = declare_parameter<double>("control_frequency_hz", 40.0);
+  perception_timeout_sec_ = declare_parameter<double>("perception_timeout_sec", 0.15);
   enabled_ = declare_parameter<bool>("enabled_on_start", false);
 
   control_frequency_hz_ = std::max(control_frequency_hz_, 1.0);
@@ -173,6 +173,7 @@ void PidLaneController::enableCallback(
   resetPid();
   recovery_active_ = false;
   last_commanded_angular_z_ = 0.0;
+  last_commanded_linear_x_ = 0.0;
   previous_lane_degraded_ = false;
   publishRecoveryState(false);
 
@@ -370,15 +371,71 @@ void PidLaneController::controlLoop()
     const double limited_output =
       std::clamp(raw_output, -active_max_angular, active_max_angular);
 
-    const double target_angular = steering_sign_ * limited_output;
-    const double angular_command = limitSteeringRate(target_angular, dt);
+    const double target_angular =
+      steering_sign_ * limited_output;
 
-    const double steering_ratio =
-      std::clamp(std::abs(angular_command) / max_angular_z_, 0.0, 1.0);
+    const double angular_command =
+      limitSteeringRate(target_angular, dt);
+
+    const double steering_demand_ratio =
+      std::clamp(
+        std::abs(target_angular) / max_angular_z_,
+        0.0,
+        1.0);
+
+
+    const double speed_ratio =
+      std::sqrt(steering_demand_ratio);
+
+    double target_speed =
+      max_linear_speed_
+      -
+      speed_ratio *
+      (
+        max_linear_speed_ -
+        min_linear_speed_
+      );
+
+    if (lane_degraded_) {
+      target_speed =
+        std::min(
+          target_speed,
+          degraded_linear_speed_);
+    }
+
+    const double max_acceleration = 0.45;  // m/s^2
+    const double max_deceleration = 1.50;  // m/s^2
+
+    const double speed_delta =
+      target_speed -
+      last_commanded_linear_x_;
 
     double commanded_speed =
-      max_linear_speed_ -
-      steering_ratio * (max_linear_speed_ - min_linear_speed_);
+      last_commanded_linear_x_;
+
+    if (speed_delta >= 0.0) {
+      const double max_delta =
+        max_acceleration * dt;
+
+      commanded_speed +=
+        std::min(speed_delta, max_delta);
+    }
+    else {
+      const double max_delta =
+        max_deceleration * dt;
+
+      commanded_speed +=
+        std::max(speed_delta, -max_delta);
+    }
+
+    commanded_speed =
+      std::clamp(
+        commanded_speed,
+        0.0,
+        max_linear_speed_);
+
+    last_commanded_linear_x_ =
+      commanded_speed;
 
     if (lane_degraded_) {
       commanded_speed = std::min(commanded_speed, degraded_linear_speed_);

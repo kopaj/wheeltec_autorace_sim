@@ -131,6 +131,7 @@ private:
   double last_valid_error_{0.0};
   double last_tracking_angular_z_{0.0};
   double recovery_turn_sign_{0.0};
+  double last_commanded_linear_x_{0.0};
 
   SteadyClock::time_point last_error_time_;
   SteadyClock::time_point last_control_time_;

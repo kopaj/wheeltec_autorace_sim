@@ -8,45 +8,39 @@ pid_lane_controller:
     cmd_vel_topic: "/cmd_vel"
 
     enabled_on_start: false
-    perception_timeout_sec: 0.25
-    control_frequency_hz: 20.0
+    perception_timeout_sec: 0.15
+    control_frequency_hz: 40.0
 
-    # PID. Lower P than before; slightly stronger D damping.
+    # Stable 0.5 m/s PID baseline.
     kp: 1.65
     ki: 0.0
-    kd: 0.18
+    kd: 0.28
     integral_limit: 0.40
-    derivative_filter_alpha: 0.15
+    derivative_filter_alpha: 0.18
 
     # Mild low-pass filtering of the image-space error.
-    error_filter_alpha: 0.30
-    error_deadband: 0.018
+    error_filter_alpha: 0.40
+    error_deadband: 0.012
 
-    # Do not let a momentary BEV / estimated-lane error drive the Ackermann
-    # steering directly to saturation.
+    # Error limiting.
     normal_error_limit: 0.45
-    degraded_error_limit: 0.30
-    degraded_kp_scale: 0.70
+    degraded_error_limit: 0.25
+    degraded_kp_scale: 0.60
 
-    # Vehicle limits. The controller starts steering a little earlier via the
-    # perception lookahead, so it no longer needs a very large late command.
+    # Stable vehicle limits.
     max_angular_z: 0.70
-    degraded_max_angular_z: 0.45
-    max_linear_speed: 0.2
-    min_linear_speed: 0.12
-    degraded_linear_speed: 0.08
+    degraded_max_angular_z: 0.40
+    max_linear_speed: 0.50
+    min_linear_speed: 0.16
+    degraded_linear_speed: 0.12
     steering_sign: -1.0
 
     # Steering slew limiter.
-    # - rise: enter a corner reasonably quickly
-    # - center: unwind steering quickly when the corner ends
-    # - reverse: prevent an immediate large command to the opposite side
-    steering_rise_rate: 2.8
-    steering_center_rate: 4.0
-    steering_reverse_rate: 1.2
+    steering_rise_rate: 4.0
+    steering_center_rate: 5.0
+    steering_reverse_rate: 1.4
 
-    # Disabled for this tuning step. The previous fixed-angle recovery could
-    # amplify an overshoot and start the left-right snake motion.
+    # Keep recovery disabled in the stable baseline.
     recovery_enabled: false
     recovery_timeout_sec: 0.60
     recovery_entry_grace_sec: 0.25
