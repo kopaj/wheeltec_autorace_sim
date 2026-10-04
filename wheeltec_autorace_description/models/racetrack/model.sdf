@@ -1,132 +1,83 @@
-<?xml version="1.0" ?>
-
+<?xml version='1.0' encoding='utf-8'?>
 <sdf version="1.8">
-
   <model name="racetrack">
-
     <!--
       The racetrack is static and cannot be moved by physics.
     -->
-
     <static>true</static>
-
-
     <link name="track_link">
-
       <!-- ===================================================== -->
       <!-- Physical driving surface                              -->
       <!-- ===================================================== -->
-
       <!--
         A thin collision box is used instead of a collision
         plane so that the vehicle has a stable physical surface.
 
         The top of the box is exactly at z = 0.
       -->
-
       <collision name="track_collision">
-
         <pose>
           0 0 -0.01 0 0 0
         </pose>
-
         <geometry>
-
           <box>
             <size>
-              9.1 9.1 0.02
+              15.0 15.0 0.02
             </size>
           </box>
-
         </geometry>
-
         <surface>
-
           <friction>
-
             <ode>
               <mu>1.0</mu>
               <mu2>1.0</mu2>
             </ode>
-
           </friction>
-
         </surface>
-
       </collision>
-
-
       <!-- ===================================================== -->
       <!-- Visible textured surface                              -->
       <!-- ===================================================== -->
-
       <visual name="track_visual">
-
         <!--
           Slightly above z=0 to avoid z-fighting.
         -->
-
         <pose>
           0 0 0.001 0 0 0
         </pose>
-
         <geometry>
-
           <plane>
-
             <normal>
               0 0 1
             </normal>
-
-            <size>
-              9.1 9.1
-            </size>
-
+            <size>9.900 9.900</size>
           </plane>
-
         </geometry>
-
-
         <material>
-
-  <ambient>
+          <ambient>
     1 1 1 1
   </ambient>
-
-  <diffuse>
+          <diffuse>
     1 1 1 1
   </diffuse>
-
-  <specular>
+          <specular>
     0 0 0 1
   </specular>
-
-  <pbr>
-
-    <metal>
-
-      <albedo_map>
+          <pbr>
+            <metal>
+              <albedo_map>
         model://racetrack/materials/textures/course.png
       </albedo_map>
-
-      <metalness>
+              <metalness>
         0.0
       </metalness>
-
-      <roughness>
+              <roughness>
         1.0
       </roughness>
-
-    </metal>
-
-  </pbr>
-
-</material>
-
+            </metal>
+          </pbr>
+        </material>
       </visual>
-
     </link>
-
   </model>
-
 </sdf>

@@ -68,6 +68,8 @@ BACKGROUND_BGR = (32, 0, 24)
 LANE_BGR = (255, 255, 255)
 CENTERLINE_DEBUG_BGR = (0, 255, 255)
 VERTEX_DEBUG_BGR = (0, 255, 0)
+SPAWN_DEBUG_BGR = (0, 0, 255)
+SPAWN_ARROW_BGR = (0, 165, 255)
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +308,13 @@ def metric_to_pixel(points: np.ndarray, track_size_m: float):
     px = np.rint(points[:, 0] * scale).astype(np.int32)
     py = np.rint((track_size_m - points[:, 1]) * scale).astype(np.int32)
     return np.column_stack((px, py))
+
+
+def metric_point_to_pixel(x_m: float, y_m: float, track_size_m: float):
+    scale = (IMAGE_SIZE_PX - 1) / track_size_m
+    px = int(round(x_m * scale))
+    py = int(round((track_size_m - y_m) * scale))
+    return px, py
 
 
 def polyline_length(points: np.ndarray) -> float:
@@ -783,7 +792,17 @@ def generate(
     model_sdf: Path | None = None,
     world_sdf: Path | None = None,
     metadata_output: Path | None = None,
+    lane_width_m: float | None = None,
+    line_width_m: float | None = None,
 ):
+    global LANE_WIDTH_M, LINE_WIDTH_M
+
+    if lane_width_m is not None:
+        LANE_WIDTH_M = float(lane_width_m)
+
+    if line_width_m is not None:
+        LINE_WIDTH_M = float(line_width_m)
+
     if not (MIN_TRACK_SIZE_M <= track_size_m <= MAX_TRACK_SIZE_M):
         raise ValueError(
             f"--track-size csak {MIN_TRACK_SIZE_M:.1f} es {MAX_TRACK_SIZE_M:.1f} m kozott lehet."
@@ -862,6 +881,26 @@ def generate(
     if not cv2.imwrite(str(output_path), image):
         raise RuntimeError(f"Nem sikerult elmenteni: {output_path}")
 
+    safety_factor = corner_radius_m / ROBOT_MIN_RADIUS_M
+    inner_boundary_radius = corner_radius_m - LANE_WIDTH_M / 2.0
+    visible_dark_gap = LANE_WIDTH_M - LINE_WIDTH_M
+    angles_deg = np.abs(np.degrees(turn_angles_rad))
+
+    spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_straight_length = recommended_spawn_pose(
+        vertices,
+        corner_radius_m,
+        track_size_m,
+    )
+
+    local_spawn_pose = [
+        spawn_x,
+        spawn_y,
+        spawn_z,
+        0.0,
+        0.0,
+        spawn_yaw,
+    ]
+
     if debug_path is not None:
         debug = image.copy()
 
@@ -895,29 +934,55 @@ def generate(
                 cv2.LINE_AA,
             )
 
+        # Spawn pozíció és heading kirajzolása a debug képre.
+        spawn_local_x = spawn_x + track_size_m / 2.0
+        spawn_local_y = spawn_y + track_size_m / 2.0
+        spawn_px = metric_point_to_pixel(spawn_local_x, spawn_local_y, track_size_m)
+
+        arrow_len_m = min(max(0.60, spawn_straight_length * 0.35), 1.25)
+        arrow_end_x = spawn_local_x + arrow_len_m * math.cos(spawn_yaw)
+        arrow_end_y = spawn_local_y + arrow_len_m * math.sin(spawn_yaw)
+        arrow_end_px = metric_point_to_pixel(arrow_end_x, arrow_end_y, track_size_m)
+
+        cv2.circle(debug, spawn_px, 11, SPAWN_DEBUG_BGR, -1, cv2.LINE_AA)
+        cv2.circle(debug, spawn_px, 18, SPAWN_ARROW_BGR, 2, cv2.LINE_AA)
+        cv2.arrowedLine(
+            debug,
+            spawn_px,
+            arrow_end_px,
+            SPAWN_ARROW_BGR,
+            4,
+            cv2.LINE_AA,
+            tipLength=0.25,
+        )
+
+        label_pos = (spawn_px[0] + 16, max(24, spawn_px[1] - 16))
+        cv2.putText(
+            debug,
+            "SPAWN",
+            label_pos,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            SPAWN_DEBUG_BGR,
+            2,
+            cv2.LINE_AA,
+        )
+
+        pose_text = f"x={spawn_x:.2f}, y={spawn_y:.2f}, yaw={spawn_yaw:.2f}"
+        cv2.putText(
+            debug,
+            pose_text,
+            (label_pos[0], label_pos[1] + 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            SPAWN_ARROW_BGR,
+            1,
+            cv2.LINE_AA,
+        )
+
         debug_path.parent.mkdir(parents=True, exist_ok=True)
         if not cv2.imwrite(str(debug_path), debug):
             raise RuntimeError(f"Nem sikerult elmenteni: {debug_path}")
-
-    safety_factor = corner_radius_m / ROBOT_MIN_RADIUS_M
-    inner_boundary_radius = corner_radius_m - LANE_WIDTH_M / 2.0
-    visible_dark_gap = LANE_WIDTH_M - LINE_WIDTH_M
-    angles_deg = np.abs(np.degrees(turn_angles_rad))
-
-    spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_straight_length = recommended_spawn_pose(
-        vertices,
-        corner_radius_m,
-        track_size_m,
-    )
-
-    local_spawn_pose = [
-        spawn_x,
-        spawn_y,
-        spawn_z,
-        0.0,
-        0.0,
-        spawn_yaw,
-    ]
     world_spawn_pose = list(local_spawn_pose)
 
     if model_sdf is not None:
@@ -1051,6 +1116,8 @@ def generate_random(
     world_sdf: Path | None,
     metadata_output: Path | None,
     random_layout_attempts: int,
+    lane_width_m: float | None = None,
+    line_width_m: float | None = None,
 ):
     if min_track_size_m > max_track_size_m:
         raise ValueError("--min-track-size nem lehet nagyobb, mint --max-track-size.")
@@ -1101,6 +1168,8 @@ def generate_random(
                 model_sdf=model_sdf,
                 world_sdf=world_sdf,
                 metadata_output=metadata_output,
+                lane_width_m=lane_width_m,
+                line_width_m=line_width_m,
             )
         except (RuntimeError, ValueError) as exc:
             last_error = exc
@@ -1202,6 +1271,20 @@ def main():
     )
 
     parser.add_argument(
+        "--lane-width",
+        type=float,
+        default=LANE_WIDTH_M,
+        help="A ket savhatar kozepvonalai kozotti savszelesseg meterben.",
+    )
+
+    parser.add_argument(
+        "--line-width",
+        type=float,
+        default=LINE_WIDTH_M,
+        help="A feher savhatarvonal vastagsaga meterben.",
+    )
+
+    parser.add_argument(
         "--max-attempts",
         type=int,
         default=6000,
@@ -1288,6 +1371,8 @@ def main():
             world_sdf=args.world_sdf,
             metadata_output=args.metadata_output,
             random_layout_attempts=max(1, args.random_layout_attempts),
+            lane_width_m=args.lane_width,
+            line_width_m=args.line_width,
         )
     else:
         generate(
@@ -1303,6 +1388,8 @@ def main():
             model_sdf=args.model_sdf,
             world_sdf=args.world_sdf,
             metadata_output=args.metadata_output,
+            lane_width_m=args.lane_width,
+            line_width_m=args.line_width,
         )
 
 
