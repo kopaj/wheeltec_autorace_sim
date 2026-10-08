@@ -109,7 +109,7 @@
         Fine tuning will be done after visually inspecting
         the textured track.
       -->
-      <pose>-1.468333 -4.405000 0.150000 0.000000 0.000000 3.141593</pose>
+      <pose>0.000000 5.605000 0.150000 0.000000 0.000000 3.141593</pose>
     </include>
   </world>
 </sdf>

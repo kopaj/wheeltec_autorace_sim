@@ -6,7 +6,6 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
-#include <numeric>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -22,11 +21,15 @@ LanePerception::LanePerception()
 : Node("lane_perception")
 {
   input_topic_ = declare_parameter<std::string>("input_topic", "/camera/image_raw");
-  debug_image_topic_ = declare_parameter<std::string>("debug_image_topic", "/lane_detection/debug_image");
-  edges_image_topic_ = declare_parameter<std::string>("edges_image_topic", "/lane_detection/edges");
-  mask_image_topic_ = declare_parameter<std::string>("mask_image_topic", "/lane_detection/white_mask");
-  birdseye_mask_topic_ = declare_parameter<std::string>("birdseye_mask_topic", "/lane_detection/birdseye_mask");
+  current_speed_topic_ =
+    declare_parameter<std::string>(
+      "current_speed_topic",
+      "/control/pure_pursuit/current_speed");
   birdseye_debug_topic_ = declare_parameter<std::string>("birdseye_debug_topic", "/lane_detection/birdseye_debug");
+  turn_preview_debug_topic_ =
+    declare_parameter<std::string>(
+      "turn_preview_debug_topic",
+      "/lane_detection/turn_preview_debug");
 
   valid_topic_ = declare_parameter<std::string>("valid_topic", "/lane_detection/valid");
   degraded_topic_ = declare_parameter<std::string>("degraded_topic", "/lane_detection/degraded");
@@ -34,16 +37,53 @@ LanePerception::LanePerception()
   error_normalized_topic_ = declare_parameter<std::string>("error_normalized_topic", "/lane_detection/cross_track_error_normalized");
   heading_error_topic_ = declare_parameter<std::string>("heading_error_topic", "/lane_detection/heading_error");
   control_error_topic_ = declare_parameter<std::string>("control_error_topic", "/lane_detection/control_error_normalized");
+  turn_preview_topic_ =
+    declare_parameter<std::string>(
+      "turn_preview_topic",
+      "/lane_detection/turn_preview");
 
   white_min_value_ = declare_parameter<int>("white_min_value", 185);
   white_max_saturation_ = declare_parameter<int>("white_max_saturation", 80);
   gaussian_kernel_ = declare_parameter<int>("gaussian_kernel", 5);
 
-  canny_low_ = declare_parameter<int>("canny_low", 50);
-  canny_high_ = declare_parameter<int>("canny_high", 150);
-  hough_threshold_ = declare_parameter<int>("hough_threshold", 20);
-  hough_min_line_length_ = declare_parameter<double>("hough_min_line_length", 20.0);
-  hough_max_line_gap_ = declare_parameter<double>("hough_max_line_gap", 35.0);
+  turn_preview_enabled_ =
+    declare_parameter<bool>("turn_preview_enabled", true);
+  turn_preview_canny_low_ =
+    declare_parameter<int>("turn_preview_canny_low", 50);
+  turn_preview_canny_high_ =
+    declare_parameter<int>("turn_preview_canny_high", 150);
+  turn_preview_hough_threshold_ =
+    declare_parameter<int>("turn_preview_hough_threshold", 15);
+  turn_preview_hough_min_line_length_ =
+    declare_parameter<double>("turn_preview_hough_min_line_length", 15.0);
+  turn_preview_hough_max_line_gap_ =
+    declare_parameter<double>("turn_preview_hough_max_line_gap", 20.0);
+
+  turn_preview_roi_top_ratio_ =
+    declare_parameter<double>("turn_preview_roi_top_ratio", 0.10);
+  turn_preview_roi_bottom_ratio_ =
+    declare_parameter<double>("turn_preview_roi_bottom_ratio", 0.62);
+  turn_preview_roi_top_width_ratio_ =
+    declare_parameter<double>("turn_preview_roi_top_width_ratio", 0.24);
+  turn_preview_roi_bottom_width_ratio_ =
+    declare_parameter<double>("turn_preview_roi_bottom_width_ratio", 0.92);
+
+  // In the ORIGINAL camera image, normal straight lane boundaries converge
+  // toward the horizon and are therefore already diagonal.  A tight corner
+  // appearing far ahead produces significantly more HORIZONTAL local
+  // segments.  We therefore score lines by angle from the horizontal:
+  //   0 deg  -> strong corner cue
+  //   90 deg -> vertical / straight-ahead cue
+  turn_preview_angle_start_deg_ =
+    declare_parameter<double>("turn_preview_angle_start_deg", 38.0);
+  turn_preview_angle_full_deg_ =
+    declare_parameter<double>("turn_preview_angle_full_deg", 12.0);
+  turn_preview_min_evidence_length_px_ =
+    declare_parameter<double>("turn_preview_min_evidence_length_px", 80.0);
+  turn_preview_attack_alpha_ =
+    declare_parameter<double>("turn_preview_attack_alpha", 0.72);
+  turn_preview_release_alpha_ =
+    declare_parameter<double>("turn_preview_release_alpha", 0.12);
 
   perspective_top_ratio_ = declare_parameter<double>("perspective_top_ratio", 0.34);
   perspective_bottom_ratio_ = declare_parameter<double>("perspective_bottom_ratio", 0.90);
@@ -98,16 +138,60 @@ LanePerception::LanePerception()
   control_near_weight_ = std::clamp(control_near_weight_, 0.0, 1.0);
   lane_width_filter_alpha_ = std::clamp(lane_width_filter_alpha_, 0.0, 1.0);
 
+  turn_preview_canny_low_ = std::max(turn_preview_canny_low_, 0);
+  turn_preview_canny_high_ =
+    std::max(turn_preview_canny_high_, turn_preview_canny_low_ + 1);
+  turn_preview_hough_threshold_ =
+    std::max(turn_preview_hough_threshold_, 1);
+  turn_preview_hough_min_line_length_ =
+    std::max(turn_preview_hough_min_line_length_, 1.0);
+  turn_preview_hough_max_line_gap_ =
+    std::max(turn_preview_hough_max_line_gap_, 0.0);
+
+  turn_preview_roi_top_ratio_ =
+    std::clamp(turn_preview_roi_top_ratio_, 0.0, 0.95);
+  turn_preview_roi_bottom_ratio_ =
+    std::clamp(
+      turn_preview_roi_bottom_ratio_,
+      turn_preview_roi_top_ratio_ + 0.02,
+      1.0);
+  turn_preview_roi_top_width_ratio_ =
+    std::clamp(turn_preview_roi_top_width_ratio_, 0.05, 1.0);
+  turn_preview_roi_bottom_width_ratio_ =
+    std::clamp(
+      turn_preview_roi_bottom_width_ratio_,
+      turn_preview_roi_top_width_ratio_,
+      1.0);
+
+  turn_preview_angle_start_deg_ =
+    std::clamp(turn_preview_angle_start_deg_, 1.0, 89.0);
+  turn_preview_angle_full_deg_ =
+    std::clamp(
+      turn_preview_angle_full_deg_,
+      0.0,
+      turn_preview_angle_start_deg_ - 1.0);
+  turn_preview_min_evidence_length_px_ =
+    std::max(turn_preview_min_evidence_length_px_, 1.0);
+  turn_preview_attack_alpha_ =
+    std::clamp(turn_preview_attack_alpha_, 0.0, 1.0);
+  turn_preview_release_alpha_ =
+    std::clamp(turn_preview_release_alpha_, 0.0, 1.0);
+
   image_sub_ = create_subscription<sensor_msgs::msg::Image>(
     input_topic_,
     rclcpp::SensorDataQoS(),
     std::bind(&LanePerception::imageCallback, this, std::placeholders::_1));
 
-  debug_image_pub_ = create_publisher<sensor_msgs::msg::Image>(debug_image_topic_, rclcpp::SensorDataQoS());
-  edges_image_pub_ = create_publisher<sensor_msgs::msg::Image>(edges_image_topic_, rclcpp::SensorDataQoS());
-  mask_image_pub_ = create_publisher<sensor_msgs::msg::Image>(mask_image_topic_, rclcpp::SensorDataQoS());
-  birdseye_mask_pub_ = create_publisher<sensor_msgs::msg::Image>(birdseye_mask_topic_, rclcpp::SensorDataQoS());
+  speed_sub_ = create_subscription<std_msgs::msg::Float64>(
+    current_speed_topic_,
+    10,
+    std::bind(&LanePerception::speedCallback, this, std::placeholders::_1));
+
   birdseye_debug_pub_ = create_publisher<sensor_msgs::msg::Image>(birdseye_debug_topic_, rclcpp::SensorDataQoS());
+  turn_preview_debug_pub_ =
+    create_publisher<sensor_msgs::msg::Image>(
+      turn_preview_debug_topic_,
+      rclcpp::SensorDataQoS());
 
   valid_pub_ = create_publisher<std_msgs::msg::Bool>(valid_topic_, 10);
   degraded_pub_ = create_publisher<std_msgs::msg::Bool>(degraded_topic_, 10);
@@ -115,11 +199,20 @@ LanePerception::LanePerception()
   error_normalized_pub_ = create_publisher<std_msgs::msg::Float64>(error_normalized_topic_, 10);
   heading_error_pub_ = create_publisher<std_msgs::msg::Float64>(heading_error_topic_, 10);
   control_error_pub_ = create_publisher<std_msgs::msg::Float64>(control_error_topic_, 10);
+  turn_preview_pub_ =
+    create_publisher<std_msgs::msg::Float64>(turn_preview_topic_, 10);
 
   RCLCPP_INFO(
     get_logger(),
-    "Lane perception started: BEV sliding-window control + Canny/Hough debug. Input: %s",
+    "Lane perception started: BEV sliding-window + RAW Hough preview. Retained debug: birdseye_debug, turn_preview_debug. Input: %s",
     input_topic_.c_str());
+}
+
+void LanePerception::speedCallback(
+  const std_msgs::msg::Float64::ConstSharedPtr msg)
+{
+  current_speed_mps_ = msg->data;
+  have_current_speed_ = true;
 }
 
 LanePerception::PolynomialLane LanePerception::fitPolynomial(
@@ -262,56 +355,287 @@ void LanePerception::imageCallback(
     morphology_kernel);
 
   // ==========================================================
-  // 3. Canny + Hough retained as a diagnostic/thesis output
+  // 3. Far-field Hough turn preview in the ORIGINAL camera image
   // ==========================================================
+  //
+  // The BEV transform is excellent for lane-center estimation near/medium
+  // range, but for *earlier* corner anticipation it throws away some of the
+  // raw camera's long-range context.
+  //
+  // Therefore this preview branch works directly in the source image:
+  //   white mask -> Canny -> trapezoid ROI ahead of the robot -> Hough
+  //
+  // It still NEVER changes the steering target. It only publishes a
+  // 0..1 turn-preview score for anticipatory speed limiting.
 
-  cv::Mat blurred;
-  cv::GaussianBlur(
-    white_mask,
-    blurred,
-    cv::Size(gaussian_kernel_, gaussian_kernel_),
-    0.0);
+  cv::Mat turn_preview_edges =
+    cv::Mat::zeros(frame.size(), CV_8UC1);
 
-  cv::Mat edges;
-  cv::Canny(blurred, edges, canny_low_, canny_high_);
+  std::vector<cv::Vec4i> turn_preview_lines;
+  std::vector<double> turn_preview_line_scores;
 
-  cv::Mat hough_roi_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
-  std::vector<cv::Point> hough_roi{
-    cv::Point(static_cast<int>(width * perspective_bottom_left_ratio_), static_cast<int>(bottom_y)),
-    cv::Point(static_cast<int>(width * perspective_top_left_ratio_), static_cast<int>(top_y)),
-    cv::Point(static_cast<int>(width * perspective_top_right_ratio_), static_cast<int>(top_y)),
-    cv::Point(static_cast<int>(width * perspective_bottom_right_ratio_), static_cast<int>(bottom_y))
+  double raw_turn_preview = 0.0;
+
+  const int preview_top =
+    std::clamp(
+      static_cast<int>(
+        std::round(height * turn_preview_roi_top_ratio_)),
+      0,
+      height - 1);
+
+  const int preview_bottom =
+    std::clamp(
+      static_cast<int>(
+        std::round(height * turn_preview_roi_bottom_ratio_)),
+      preview_top + 1,
+      height);
+
+  const int preview_center_x =
+    static_cast<int>(std::round(image_center_x));
+
+  const int preview_top_half_width =
+    std::clamp(
+      static_cast<int>(
+        std::round(
+          0.5 * width * turn_preview_roi_top_width_ratio_)),
+      1,
+      width / 2);
+
+  const int preview_bottom_half_width =
+    std::clamp(
+      static_cast<int>(
+        std::round(
+          0.5 * width * turn_preview_roi_bottom_width_ratio_)),
+      preview_top_half_width,
+      width / 2);
+
+  std::vector<cv::Point> turn_preview_roi{
+    cv::Point(
+      std::max(0, preview_center_x - preview_bottom_half_width),
+      preview_bottom),
+    cv::Point(
+      std::max(0, preview_center_x - preview_top_half_width),
+      preview_top),
+    cv::Point(
+      std::min(width - 1, preview_center_x + preview_top_half_width),
+      preview_top),
+    cv::Point(
+      std::min(width - 1, preview_center_x + preview_bottom_half_width),
+      preview_bottom)
   };
-  cv::fillConvexPoly(hough_roi_mask, hough_roi, cv::Scalar(255));
 
-  cv::Mat roi_edges;
-  cv::bitwise_and(edges, hough_roi_mask, roi_edges);
+  if (turn_preview_enabled_) {
+    cv::Mat preview_blurred;
+    cv::GaussianBlur(
+      white_mask,
+      preview_blurred,
+      cv::Size(gaussian_kernel_, gaussian_kernel_),
+      0.0);
 
-  std::vector<cv::Vec4i> hough_lines;
-  cv::HoughLinesP(
-    roi_edges,
-    hough_lines,
-    1.0,
-    CV_PI / 180.0,
-    hough_threshold_,
-    hough_min_line_length_,
-    hough_max_line_gap_);
+    cv::Mat preview_all_edges;
+    cv::Canny(
+      preview_blurred,
+      preview_all_edges,
+      turn_preview_canny_low_,
+      turn_preview_canny_high_);
 
-  cv::Mat debug = frame.clone();
+    cv::Mat preview_roi_mask =
+      cv::Mat::zeros(frame.size(), CV_8UC1);
+    cv::fillConvexPoly(
+      preview_roi_mask,
+      turn_preview_roi,
+      cv::Scalar(255));
+
+    cv::bitwise_and(
+      preview_all_edges,
+      preview_roi_mask,
+      turn_preview_edges);
+
+    cv::HoughLinesP(
+      turn_preview_edges,
+      turn_preview_lines,
+      1.0,
+      CV_PI / 180.0,
+      turn_preview_hough_threshold_,
+      turn_preview_hough_min_line_length_,
+      turn_preview_hough_max_line_gap_);
+
+    double weighted_score_sum = 0.0;
+    double evidence_length_sum = 0.0;
+
+    turn_preview_line_scores.reserve(turn_preview_lines.size());
+
+    for (const auto & line : turn_preview_lines) {
+      const double dx =
+        static_cast<double>(line[2] - line[0]);
+      const double dy =
+        static_cast<double>(line[3] - line[1]);
+      const double length =
+        std::hypot(dx, dy);
+
+      if (length < 1e-6) {
+        turn_preview_line_scores.push_back(0.0);
+        continue;
+      }
+
+      // Fold Hough angle to [0, 90]:
+      //   0  deg = horizontal
+      //   90 deg = vertical
+      double angle_from_horizontal_deg =
+        std::abs(
+          std::atan2(dy, dx) *
+          180.0 / CV_PI);
+
+      if (angle_from_horizontal_deg > 90.0) {
+        angle_from_horizontal_deg =
+          180.0 - angle_from_horizontal_deg;
+      }
+
+      // Far, nearly horizontal lane-marking fragments are the early cue for
+      // a strong bend in the raw perspective image.
+      //
+      // start_deg: first angle that begins contributing
+      // full_deg:  angle at/below which contribution is maximal
+      const double line_score =
+        std::clamp(
+          (turn_preview_angle_start_deg_ - angle_from_horizontal_deg) /
+          std::max(
+            1e-6,
+            turn_preview_angle_start_deg_ -
+            turn_preview_angle_full_deg_),
+          0.0,
+          1.0);
+
+      // Farther lines (higher in the image) should matter more, because they
+      // provide earlier anticipation. Weight them slightly higher.
+      const double midpoint_y =
+        0.5 * static_cast<double>(line[1] + line[3]);
+
+      const double roi_height =
+        std::max(
+          1.0,
+          static_cast<double>(preview_bottom - preview_top));
+
+      const double normalized_depth =
+        std::clamp(
+          (midpoint_y - static_cast<double>(preview_top)) /
+          roi_height,
+          0.0,
+          1.0);
+
+      const double far_weight =
+        std::clamp(
+          1.0 - 0.75 * normalized_depth,
+          0.25,
+          1.0);
+
+      turn_preview_line_scores.push_back(line_score);
+
+      if (line_score > 0.0) {
+        weighted_score_sum +=
+          length * far_weight * line_score;
+        evidence_length_sum +=
+          length * far_weight;
+      }
+    }
+
+    if (evidence_length_sum > 1e-6) {
+      const double average_corner_score =
+        weighted_score_sum / evidence_length_sum;
+
+      const double evidence_factor =
+        std::clamp(
+          evidence_length_sum /
+          turn_preview_min_evidence_length_px_,
+          0.0,
+          1.0);
+
+      raw_turn_preview =
+        std::clamp(
+          average_corner_score * evidence_factor,
+          0.0,
+          1.0);
+    }
+  }
+
+  if (!have_turn_preview_) {
+    filtered_turn_preview_ = raw_turn_preview;
+    have_turn_preview_ = true;
+  } else {
+    const double alpha =
+      raw_turn_preview > filtered_turn_preview_
+      ? turn_preview_attack_alpha_
+      : turn_preview_release_alpha_;
+
+    filtered_turn_preview_ =
+      alpha * raw_turn_preview +
+      (1.0 - alpha) * filtered_turn_preview_;
+  }
+
+  filtered_turn_preview_ =
+    std::clamp(filtered_turn_preview_, 0.0, 1.0);
+
+  std_msgs::msg::Float64 turn_preview_msg;
+  turn_preview_msg.data =
+    turn_preview_enabled_ ? filtered_turn_preview_ : 0.0;
+  turn_preview_pub_->publish(turn_preview_msg);
+
+  // Dedicated turn-preview debug image.
+  // IMPORTANT: this image is a clone of /camera/image_raw, NOT bird's-eye.
+  cv::Mat turn_preview_debug = frame.clone();
+
   cv::polylines(
-    debug,
-    std::vector<std::vector<cv::Point>>{hough_roi},
+    turn_preview_debug,
+    std::vector<std::vector<cv::Point>>{turn_preview_roi},
     true,
-    cv::Scalar(0, 165, 255),
-    2);
+    cv::Scalar(255, 0, 255),
+    3);
 
-  for (const auto & line : hough_lines) {
+  for (std::size_t i = 0; i < turn_preview_lines.size(); ++i) {
+    const auto & line = turn_preview_lines[i];
+    const double line_score =
+      i < turn_preview_line_scores.size()
+      ? turn_preview_line_scores[i]
+      : 0.0;
+
+    const cv::Scalar color =
+      line_score > 0.05
+      ? cv::Scalar(0, 0, 255)
+      : cv::Scalar(160, 160, 160);
+
+    const int thickness =
+      line_score > 0.50 ? 4 : 2;
+
     cv::line(
-      debug,
+      turn_preview_debug,
       cv::Point(line[0], line[1]),
       cv::Point(line[2], line[3]),
-      cv::Scalar(0, 255, 255),
-      1);
+      color,
+      thickness,
+      cv::LINE_AA);
+  }
+
+  {
+    std::ostringstream text;
+    text
+      << std::fixed << std::setprecision(2)
+      << "RAW CAMERA TURN PREVIEW  raw/filt="
+      << raw_turn_preview
+      << "/"
+      << filtered_turn_preview_
+      << "  lines="
+      << turn_preview_lines.size();
+
+    cv::putText(
+      turn_preview_debug,
+      text.str(),
+      cv::Point(18, 32),
+      cv::FONT_HERSHEY_SIMPLEX,
+      0.62,
+      filtered_turn_preview_ >= 0.20
+        ? cv::Scalar(0, 0, 255)
+        : cv::Scalar(255, 0, 255),
+      2);
   }
 
   // ==========================================================
@@ -879,38 +1203,6 @@ void LanePerception::imageCallback(
     (degraded_detection ? cv::Scalar(0, 255, 255) : cv::Scalar(0, 255, 0)) :
     cv::Scalar(0, 0, 255);
 
-  const std::string camera_status =
-    detection_valid ? ("LANE: " + state_text) : ("LANE: LOST - " + invalid_reason);
-
-  cv::putText(
-    debug,
-    camera_status,
-    cv::Point(20, 30),
-    cv::FONT_HERSHEY_SIMPLEX,
-    0.68,
-    status_color,
-    2);
-
-  cv::putText(
-    debug,
-    "CONTROL: BEV + SLIDING WINDOW (Hough debug only)",
-    cv::Point(20, 58),
-    cv::FONT_HERSHEY_SIMPLEX,
-    0.48,
-    cv::Scalar(255, 255, 255),
-    1);
-
-  std::ostringstream hough_text;
-  hough_text << "Hough segments: " << hough_lines.size();
-  cv::putText(
-    debug,
-    hough_text.str(),
-    cv::Point(20, height - 20),
-    cv::FONT_HERSHEY_SIMPLEX,
-    0.50,
-    cv::Scalar(255, 255, 255),
-    1);
-
   std::ostringstream bird_text;
   bird_text
     << state_text
@@ -935,6 +1227,7 @@ void LanePerception::imageCallback(
     0.60,
     status_color,
     2);
+
 
   if (std::isfinite(raw_width_near_ratio) &&
       std::isfinite(raw_width_lookahead_ratio))
@@ -985,7 +1278,7 @@ void LanePerception::imageCallback(
     std::ostringstream width_text;
     width_text
       << std::fixed << std::setprecision(2)
-      << "W near/look=" 
+      << "W near/look="
       << debug_width_near / static_cast<double>(width)
       << "/"
       << debug_width_lookahead / static_cast<double>(width);
@@ -1000,21 +1293,37 @@ void LanePerception::imageCallback(
       2);
   }
 
-  auto debug_msg =
-    cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::BGR8, debug).toImageMsg();
-  debug_image_pub_->publish(*debug_msg);
+  {
+    std::ostringstream speed_text;
+    speed_text << std::fixed << std::setprecision(2);
 
-  auto edges_msg =
-    cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::MONO8, roi_edges).toImageMsg();
-  edges_image_pub_->publish(*edges_msg);
+    if (have_current_speed_) {
+      speed_text
+        << "CMD_V="
+        << current_speed_mps_
+        << " m/s  ("
+        << current_speed_mps_ * 3.6
+        << " km/h)";
+    } else {
+      speed_text << "CMD_V=--.-- m/s";
+    }
 
-  auto mask_msg =
-    cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::MONO8, white_mask).toImageMsg();
-  mask_image_pub_->publish(*mask_msg);
+    cv::putText(
+      birdseye_debug,
+      speed_text.str(),
+      cv::Point(15, 136),
+      cv::FONT_HERSHEY_SIMPLEX,
+      0.52,
+      cv::Scalar(255, 220, 0),
+      2);
+  }
 
-  auto bird_mask_msg =
-    cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::MONO8, birdseye_mask).toImageMsg();
-  birdseye_mask_pub_->publish(*bird_mask_msg);
+  auto turn_preview_debug_msg =
+    cv_bridge::CvImage(
+      msg->header,
+      sensor_msgs::image_encodings::BGR8,
+      turn_preview_debug).toImageMsg();
+  turn_preview_debug_pub_->publish(*turn_preview_debug_msg);
 
   auto bird_debug_msg =
     cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::BGR8, birdseye_debug).toImageMsg();

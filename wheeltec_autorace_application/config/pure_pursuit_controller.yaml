@@ -1,0 +1,64 @@
+pure_pursuit_controller:
+  ros__parameters:
+
+    # ROS interfaces
+    error_topic: "/lane_detection/control_error_normalized"
+    valid_topic: "/lane_detection/valid"
+    degraded_topic: "/lane_detection/degraded"
+    turn_preview_topic: "/lane_detection/turn_preview"
+    cmd_vel_topic: "/cmd_vel"
+    current_speed_topic: "/control/pure_pursuit/current_speed"
+
+    enabled_on_start: false
+    perception_timeout_sec: 0.15
+    control_frequency_hz: 40.0
+
+    # Wheeltec / Ackermann geometry
+    wheel_base_m: 0.262
+    max_steering_angle_rad: 0.40
+    steering_sign: -1.0
+
+    # Base lookahead for corners
+    lookahead_distance_m: 0.55
+
+    # On a straight the RAW preview is near 0, so lookahead grows toward this
+    # value. As a corner appears, it continuously returns toward 0.55 m.
+    straight_lookahead_distance_m: 0.72
+
+    normalized_lateral_scale_m: 0.85
+
+    # Input filtering / safety
+    error_filter_alpha: 0.20
+    error_deadband: 0.012
+    normal_error_limit: 0.45
+    degraded_error_limit: 0.25
+
+    # Speed envelope
+    max_linear_speed: 1.00
+    min_linear_speed: 0.25
+    degraded_linear_speed: 0.18
+
+    # Physically motivated curve-speed limit:
+    # v^2 * |curvature| <= max_lateral_accel_mps2
+    max_lateral_accel_mps2: 0.20
+
+    # Slow acceleration, strong braking
+    max_acceleration: 0.75
+    max_deceleration: 2.00
+
+    # One steering/yaw-rate slew parameter
+    angular_rate_limit: 3.0
+
+    # RAW-camera Hough turn preview.
+    # The filtered 0..1 score maps directly to a speed cap.
+    turn_preview_enabled: true
+    turn_preview_timeout_sec: 0.25
+    turn_preview_min_speed: 0.18
+
+    # Scalar debug topics
+    lateral_target_topic: "/control/pure_pursuit/lateral_target_m"
+    alpha_topic: "/control/pure_pursuit/alpha"
+    curvature_topic: "/control/pure_pursuit/curvature"
+    steering_angle_topic: "/control/pure_pursuit/steering_angle"
+    output_topic: "/control/pure_pursuit/output"
+    active_topic: "/control/pure_pursuit/active"

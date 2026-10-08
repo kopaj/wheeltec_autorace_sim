@@ -102,6 +102,30 @@ ament_target_dependencies(
 
 
 # ============================================================
+# Pure Pursuit controller
+# ============================================================
+
+
+add_executable(pure_pursuit_controller
+  src/pure_pursuit_controller.cpp
+)
+
+ament_target_dependencies(
+  pure_pursuit_controller
+
+  rclcpp
+  geometry_msgs
+  std_msgs
+  std_srvs
+)
+
+target_include_directories(pure_pursuit_controller PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+
+# ============================================================
 # Installation
 # ============================================================
 
@@ -109,6 +133,7 @@ install(
   TARGETS
     lane_perception
     pid_lane_controller
+    pure_pursuit_controller
 
   DESTINATION
     lib/${PROJECT_NAME}
@@ -127,6 +152,14 @@ install(
 install(
   DIRECTORY
     config
+
+  DESTINATION
+    share/${PROJECT_NAME}
+)
+
+install(
+  DIRECTORY
+    launch
 
   DESTINATION
     share/${PROJECT_NAME}

@@ -3,11 +3,9 @@ lane_perception:
 
     # ROS topics
     input_topic: "/camera/image_raw"
-    debug_image_topic: "/lane_detection/debug_image"
-    edges_image_topic: "/lane_detection/edges"
-    mask_image_topic: "/lane_detection/white_mask"
-    birdseye_mask_topic: "/lane_detection/birdseye_mask"
+    current_speed_topic: "/control/pure_pursuit/current_speed"
     birdseye_debug_topic: "/lane_detection/birdseye_debug"
+    turn_preview_debug_topic: "/lane_detection/turn_preview_debug"
 
     valid_topic: "/lane_detection/valid"
     degraded_topic: "/lane_detection/degraded"
@@ -15,19 +13,44 @@ lane_perception:
     error_normalized_topic: "/lane_detection/cross_track_error_normalized"
     heading_error_topic: "/lane_detection/heading_error"
     control_error_topic: "/lane_detection/control_error_normalized"
+    turn_preview_topic: "/lane_detection/turn_preview"
 
     # White lane segmentation
     white_min_value: 185
     white_max_saturation: 80
     gaussian_kernel: 5
 
-    # Canny/Hough are retained for thesis/debug visualization.
-    # They no longer define the control centerline.
-    canny_low: 50
-    canny_high: 150
-    hough_threshold: 20
-    hough_min_line_length: 20.0
-    hough_max_line_gap: 35.0
+    # Far-field turn anticipation in the ORIGINAL camera image.
+    # This branch NEVER changes the lane centerline or steering target.
+    # It publishes only a 0..1 turn-risk score for early speed reduction.
+    turn_preview_enabled: true
+
+    turn_preview_canny_low: 50
+    turn_preview_canny_high: 150
+    turn_preview_hough_threshold: 18
+    turn_preview_hough_min_line_length: 20.0
+    turn_preview_hough_max_line_gap: 25.0
+
+    # Camera-space ROI ahead of the robot.
+    # Top is farther away, bottom is nearer; widths are image-width ratios.
+    turn_preview_roi_top_ratio: 0.10
+    turn_preview_roi_bottom_ratio: 0.62
+    turn_preview_roi_top_width_ratio: 0.24
+    turn_preview_roi_bottom_width_ratio: 0.92
+
+    # Angle is measured from the HORIZONTAL direction in the RAW camera image:
+    #   0 deg  -> horizontal -> strong far-corner cue
+    #   90 deg -> vertical
+    #
+    # Straight lane boundaries are normally much steeper than this threshold,
+    # while the distant part of a 90-degree bend produces flatter segments.
+    turn_preview_angle_start_deg: 38.0
+    turn_preview_angle_full_deg: 12.0
+    turn_preview_min_evidence_length_px: 80.0
+
+    # Fast activation, slower release.
+    turn_preview_attack_alpha: 0.72
+    turn_preview_release_alpha: 0.12
 
     # Perspective transform source trapezoid.
     # This maps the visible track plane to a bird's-eye image.
@@ -57,15 +80,16 @@ lane_perception:
     evaluation_far_ratio: 0.58
 
     # Smaller y means farther ahead in bird's-eye view.
-    control_lookahead_ratio: 0.24
+    control_lookahead_ratio: 0.28
 
-    # Control error: mostly lookahead, with a small near-center contribution.
+    # Control error = 20% near center + 80% lookahead center.
     control_near_weight: 0.10
 
     # Plausible lane-width range in the current BEV image.
     # The present perspective transform is not metric-calibrated, therefore
     # the two lane boundaries are not perfectly parallel and the apparent
-    # width changes with y.
+    # width changes with y. Keep this check deliberately permissive; the
+    # controller uses ordering + polynomial continuity as the main geometry.
     min_lane_width_ratio: 0.08
     max_lane_width_ratio: 1.30
 
