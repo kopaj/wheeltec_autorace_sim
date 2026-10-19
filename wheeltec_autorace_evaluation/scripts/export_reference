@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from wheeltec_autorace_evaluation.exporter import main
+if __name__ == '__main__':
+    main()

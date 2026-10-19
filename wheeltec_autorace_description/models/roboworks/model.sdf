@@ -556,15 +556,16 @@
         <right_steering_joint>front_right_wheel_steering_joint</right_steering_joint>
         <kingpin_width>0.262</kingpin_width>
         <steering_limit>0.4</steering_limit>
-        <wheel_base>0.262</wheel_base>
-        <wheel_separation>0.3187</wheel_separation>
+        <!-- Geometry from the actual link positions: front x=.3187, rear x=0. -->
+        <wheel_base>0.3187</wheel_base>
+        <wheel_separation>0.322</wheel_separation>
         <wheel_radius>0.0625</wheel_radius>
         <odom_publish_frequency>1</odom_publish_frequency>
         <topic>roboworks/cmd_vel</topic>
         <min_velocity>-2</min_velocity>
         <max_velocity>2</max_velocity>
-        <min_acceleration>-0.1</min_acceleration>
-        <max_acceleration>0.1</max_acceleration>
+        <min_acceleration>-0.2</min_acceleration>
+        <max_acceleration>0.2</max_acceleration>
       </plugin>
     </model>
 </sdf>
