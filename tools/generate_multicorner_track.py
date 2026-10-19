@@ -39,9 +39,10 @@ import numpy as np
 # Robot
 # ---------------------------------------------------------------------------
 
-WHEEL_BASE_M = 0.262
+WHEEL_BASE_M = 0.3187
 STEERING_LIMIT_RAD = 0.4
-ROBOT_MIN_RADIUS_M = WHEEL_BASE_M / math.tan(STEERING_LIMIT_RAD)
+# Fortress SDF steering_limit uses R_min = L / sin(limit).
+ROBOT_MIN_RADIUS_M = WHEEL_BASE_M / math.sin(STEERING_LIMIT_RAD)
 
 
 # ---------------------------------------------------------------------------

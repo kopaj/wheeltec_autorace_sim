@@ -3,7 +3,8 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, OpaqueFunction
+from launch.substitutions import LaunchConfiguration
 from launch.actions import SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
@@ -65,6 +66,25 @@ def generate_launch_description():
         launch_arguments={
             'gz_args': f'-r -v 4 {world_path}'
         }.items()
+    )
+
+    # One controller process per launch. Never launch both and rely on enable flags.
+    def selected_controller(context):
+        selected = LaunchConfiguration('controller').perform(context)
+        if selected == 'none':
+            return []
+        executable = {'pure_pursuit': 'pure_pursuit_controller',
+                      'pid': 'pid_lane_controller'}[selected]
+        return [Node(
+            package='wheeltec_autorace_application', executable=executable,
+            name=executable, output='screen',
+            parameters=[os.path.join(application_package, 'config', executable + '.yaml'),
+                        {'use_sim_time': True}],
+        )]
+
+    clock_bridge = Node(
+        package='ros_gz_bridge', executable='parameter_bridge', name='clock_bridge',
+        arguments=['/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock'], output='screen',
     )
 
     cmd_vel_bridge = Node(
@@ -132,18 +152,19 @@ def generate_launch_description():
         ]
     )
 
-    lane_perception = Node(
-        package='wheeltec_autorace_application',
-        executable='lane_perception',
-        name='lane_perception',
-        output='screen',
-        parameters=[
-            lane_perception_config,
-            {
-                'use_sim_time': True
-            }
-        ]
-    )
+    def selected_perception(context):
+        selected = LaunchConfiguration('controller').perform(context)
+        # Existing CMD_V overlay must follow the controller actually launched.
+        # No image-processing, target-selection or PP parameter changes here.
+        speed_topic = ('/control/pid/current_speed' if selected == 'pid'
+                       else '/control/pure_pursuit/current_speed')
+        return [Node(
+            package='wheeltec_autorace_application',
+            executable='lane_perception', name='lane_perception', output='screen',
+            parameters=[lane_perception_config,
+                        {'use_sim_time': True, 'current_speed_topic': speed_topic,
+                         'debug_controller': selected}],
+        )]
 
     rqt_image_view = Node(
         package='rqt_image_view',
@@ -153,11 +174,15 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument('controller', default_value='pure_pursuit',
+                              choices=['pure_pursuit', 'pid', 'none']),
+        clock_bridge,
+        OpaqueFunction(function=selected_controller),
         gazebo_resource_path,
         gazebo,
         cmd_vel_bridge,
         camera_image_bridge,
         camera_info_bridge,
-        lane_perception,
+        OpaqueFunction(function=selected_perception),
         rqt_image_view
     ])

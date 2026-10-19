@@ -29,9 +29,11 @@ def generate_launch_description():
     bringup_share = get_package_share_directory(
         "wheeltec_autorace_bringup"
     )
+    # Fail before changing the track if the exporter package is unavailable.
+    get_package_share_directory("wheeltec_autorace_evaluation")
 
     generator_default = os.path.expanduser(
-        "~/wheeltec_autorace_ws/src/"
+        "~/wheeltec_pp_clean_ws/src/"
         "wheeltec_autorace_sim/tools/generate_multicorner_track.py"
     )
 
@@ -64,8 +66,9 @@ def generate_launch_description():
         "racetrack_world.sdf",
     )
 
-    debug_png = "/tmp/wheeltec_random_track_debug.png"
-    metadata_json = "/tmp/wheeltec_random_track.json"
+    debug_png = LaunchConfiguration("debug_file")
+    metadata_json = LaunchConfiguration("metadata_file")
+    reference_json = LaunchConfiguration("reference_file")
 
     prepare_track = ExecuteProcess(
         cmd=[
@@ -103,8 +106,36 @@ def generate_launch_description():
                 "launch",
                 "simulation.launch.py",
             )
-        )
+        ),
+        launch_arguments={"controller": LaunchConfiguration("controller")}.items(),
     )
+
+    prepare_reference = ExecuteProcess(
+        cmd=[
+            "ros2", "run", "wheeltec_autorace_evaluation", "export_reference",
+            "--metadata", metadata_json,
+            "--generator", generator_script,
+            "--variation", variation,
+            "--texture", course_png,
+            "--model", model_sdf,
+            "--robot-model", os.path.join(description_share, "models", "roboworks", "model.sdf"),
+            "--world", world_sdf,
+            "--output", reference_json,
+            "--overwrite",
+        ],
+        output="screen",
+    )
+
+    def on_reference_exit(event, _context):
+        if event.returncode != 0:
+            return [
+                LogInfo(msg="[ERROR] Reference export failed. Gazebo will NOT be started."),
+                EmitEvent(event=Shutdown(reason="Reference export failed.")),
+            ]
+        return [
+            LogInfo(msg=["Verified reference ready: ", reference_json]),
+            simulation_launch,
+        ]
 
     def on_track_generator_exit(event, _context):
         if event.returncode != 0:
@@ -124,16 +155,31 @@ def generate_launch_description():
 
         return [
             LogInfo(
-                msg=(
-                    "Random racetrack ready. "
-                    f"Metadata: {metadata_json} | Debug: {debug_png}"
-                )
+                msg=["Random racetrack ready. Metadata: ", metadata_json,
+                     ". Exporting matching reference..."]
             ),
-            simulation_launch,
+            prepare_reference,
         ]
 
     return LaunchDescription(
         [
+            DeclareLaunchArgument("controller", default_value="pure_pursuit",
+                                  choices=["pure_pursuit", "pid", "none"]),
+            DeclareLaunchArgument(
+                "reference_file",
+                default_value=os.path.expanduser("~/wheeltec_benchmark/reference.json"),
+                description="Current reference; replaced after every successful generation/export.",
+            ),
+            DeclareLaunchArgument(
+                "metadata_file",
+                default_value=os.path.expanduser("~/wheeltec_benchmark/track_metadata.json"),
+                description="Persistent generation metadata for the current track.",
+            ),
+            DeclareLaunchArgument(
+                "debug_file",
+                default_value=os.path.expanduser("~/wheeltec_benchmark/track_debug.png"),
+                description="Debug image of the current generated track.",
+            ),
             DeclareLaunchArgument(
                 "generator_script",
                 default_value=generator_default,
@@ -175,12 +221,16 @@ def generate_launch_description():
                     "Generating a fresh random racetrack before Gazebo startup..."
                 )
             ),
-            prepare_track,
+            # Register both exit handlers before starting either process.
             RegisterEventHandler(
                 OnProcessExit(
                     target_action=prepare_track,
                     on_exit=on_track_generator_exit,
                 )
             ),
+            RegisterEventHandler(
+                OnProcessExit(target_action=prepare_reference, on_exit=on_reference_exit)
+            ),
+            prepare_track,
         ]
     )

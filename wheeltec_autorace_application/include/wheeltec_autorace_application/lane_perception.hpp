@@ -1,14 +1,16 @@
 #pragma once
 
 #include <string>
+#include <memory>
+#include <geometry_msgs/msg/point_stamped.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
 #include <vector>
-
 #include <opencv2/core.hpp>
-
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <std_msgs/msg/string.hpp>
 
 namespace wheeltec_autorace_application
 {
@@ -26,22 +28,26 @@ private:
     std::size_t support{0};
   };
 
-  void imageCallback(
-    const sensor_msgs::msg::Image::ConstSharedPtr msg);
+  void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg);
 
-  void speedCallback(
-    const std_msgs::msg::Float64::ConstSharedPtr msg);
+  void speedCallback(const std_msgs::msg::Float64::ConstSharedPtr msg);
 
-  PolynomialLane fitPolynomial(
-    const std::vector<cv::Point> & points) const;
+  PolynomialLane fitPolynomial(const std::vector<cv::Point> & points) const;
 
-  static double evaluatePolynomial(
-    const cv::Vec3d & coeff,
-    double y);
+  static double evaluatePolynomial(const cv::Vec3d & coeff, double y);
 
-  static cv::Vec3d shiftedPolynomial(
-    const cv::Vec3d & coeff,
-    double x_shift);
+  // Metric target for Pure Pursuit.
+  void publishTarget(const sensor_msgs::msg::Image & image, const cv::Mat & inverse_bev,
+    const PolynomialLane & left, const PolynomialLane & right,
+    const std::vector<cv::Point> & left_points, const std::vector<cv::Point> & right_points,
+    bool valid, bool left_estimated, bool right_estimated, cv::Mat & debug);
+  rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_;
+  sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_;
+  rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr target_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr target_degraded_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr target_status_pub_;
+  double target_lookahead_m_, target_lane_width_m_;
+  double camera_forward_m_, camera_height_m_, camera_pitch_rad_;
 
   // ROS interfaces
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
@@ -61,6 +67,7 @@ private:
 
   // Topics
   std::string input_topic_;
+  std::string debug_controller_;  // Debug overlay selection.
   std::string current_speed_topic_;
   std::string birdseye_debug_topic_;
   std::string turn_preview_debug_topic_;
@@ -125,10 +132,7 @@ private:
   double max_lane_width_ratio_;
   double lane_width_filter_alpha_;
 
-  // Learned lane-width model in bird's-eye view.
-  // Instead of assuming a constant pixel width, keep a polynomial
-  // w(y) = right_x(y) - left_x(y). This remains usable even when the
-  // perspective transform is not perfectly calibrated.
+  // Learned BEV lane width: w(y) = right_x(y) - left_x(y).
   cv::Vec3d last_lane_width_coeff_{0.0, 0.0, 0.0};
   bool have_lane_width_{false};
 

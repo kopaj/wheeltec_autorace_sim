@@ -15,6 +15,18 @@ lane_perception:
     control_error_topic: "/lane_detection/control_error_normalized"
     turn_preview_topic: "/lane_detection/turn_preview"
 
+    # Metric PP target only; the existing PID perception is unchanged.
+    # Fixed radial lookahead from rear axle; no adaptive lookahead.
+    target_lookahead_m: 0.70
+    # Must match the generated track; used for locally single-boundary PP targets.
+    target_lane_width_m: 0.65
+    camera_forward_m: 0.28
+    # Settled camera height: wheel radius .0625 + camera z .15 - paint z .001.
+    # Initial spawn z=.15 is NOT the settled axle height; enable after settling.
+    camera_height_m: 0.2115
+    camera_pitch_rad: 0.45
+    # Intrinsics come from /camera/camera_info (640x480, hfov=1.4 in SDF).
+
     # White lane segmentation
     white_min_value: 185
     white_max_saturation: 80
@@ -33,7 +45,7 @@ lane_perception:
 
     # Camera-space ROI ahead of the robot.
     # Top is farther away, bottom is nearer; widths are image-width ratios.
-    turn_preview_roi_top_ratio: 0.10
+    turn_preview_roi_top_ratio: 0.20
     turn_preview_roi_bottom_ratio: 0.62
     turn_preview_roi_top_width_ratio: 0.24
     turn_preview_roi_bottom_width_ratio: 0.92
@@ -82,7 +94,7 @@ lane_perception:
     # Smaller y means farther ahead in bird's-eye view.
     control_lookahead_ratio: 0.28
 
-    # Control error = 20% near center + 80% lookahead center.
+    # PID control error = 10% near center + 90% lookahead center.
     control_near_weight: 0.10
 
     # Plausible lane-width range in the current BEV image.

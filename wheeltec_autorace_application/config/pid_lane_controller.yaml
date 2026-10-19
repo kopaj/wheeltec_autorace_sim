@@ -6,13 +6,15 @@ pid_lane_controller:
     valid_topic: "/lane_detection/valid"
     degraded_topic: "/lane_detection/degraded"
     cmd_vel_topic: "/cmd_vel"
+    turn_preview_topic: "/lane_detection/turn_preview"
+    current_speed_topic: "/control/pid/current_speed"
 
     enabled_on_start: false
-    perception_timeout_sec: 0.15
+    perception_timeout_sec: 0.30
     control_frequency_hz: 40.0
 
-    # Stable 0.5 m/s PID baseline.
-    kp: 1.65
+    # Keep the tested PID steering gains unchanged.
+    kp: 1.70
     ki: 0.0
     kd: 0.28
     integral_limit: 0.40
@@ -30,10 +32,21 @@ pid_lane_controller:
     # Stable vehicle limits.
     max_angular_z: 0.70
     degraded_max_angular_z: 0.40
-    max_linear_speed: 0.50
-    min_linear_speed: 0.16
-    degraded_linear_speed: 0.12
+    max_linear_speed: 0.85
+    min_linear_speed: 0.25
+    degraded_linear_speed: 0.25
     steering_sign: -1.0
+
+    # Anticipatory speed cap; does not enter the PID steering calculation.
+    use_turn_preview: true
+    preview_speed: 0.30
+    preview_activation_score: 0.55
+    preview_timeout_sec: 0.30  # Receipt age in steady/wall time.
+
+    # Previously hard-coded command ramps, now configurable. Same time base
+    # and defaults as the working PID; these are NOT measured vehicle accelerations.
+    max_acceleration: 0.30
+    max_deceleration: 1.50
 
     # Steering slew limiter.
     steering_rise_rate: 4.0

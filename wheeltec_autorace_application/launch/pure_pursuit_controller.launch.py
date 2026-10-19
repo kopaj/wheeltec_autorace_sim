@@ -22,6 +22,6 @@ def generate_launch_description():
             executable="pure_pursuit_controller",
             name="pure_pursuit_controller",
             output="screen",
-            parameters=[config],
+            parameters=[config, {"use_sim_time": True}],
         )
     ])

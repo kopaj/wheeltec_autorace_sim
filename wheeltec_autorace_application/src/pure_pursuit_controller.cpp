@@ -1,242 +1,126 @@
 #include "wheeltec_autorace_application/pure_pursuit_controller.hpp"
-
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <functional>
-#include <memory>
+#include <stdexcept>
+#include <string>
+#include <iomanip>
+#include <sstream>
 
 namespace wheeltec_autorace_application
 {
 
-PurePursuitController::PurePursuitController()
-: Node("pure_pursuit_controller")
+PurePursuitController::PurePursuitController() : Node("pure_pursuit_controller")
 {
-  error_topic_ = declare_parameter<std::string>(
-    "error_topic", "/lane_detection/control_error_normalized");
-  valid_topic_ = declare_parameter<std::string>(
-    "valid_topic", "/lane_detection/valid");
-  degraded_topic_ = declare_parameter<std::string>(
-    "degraded_topic", "/lane_detection/degraded");
-  turn_preview_topic_ = declare_parameter<std::string>(
-    "turn_preview_topic", "/lane_detection/turn_preview");
-  cmd_vel_topic_ = declare_parameter<std::string>(
-    "cmd_vel_topic", "/cmd_vel");
-  current_speed_topic_ = declare_parameter<std::string>(
-    "current_speed_topic", "/control/pure_pursuit/current_speed");
-
-  lateral_target_topic_ = declare_parameter<std::string>(
-    "lateral_target_topic", "/control/pure_pursuit/lateral_target_m");
-  alpha_topic_ = declare_parameter<std::string>(
-    "alpha_topic", "/control/pure_pursuit/alpha");
-  curvature_topic_ = declare_parameter<std::string>(
-    "curvature_topic", "/control/pure_pursuit/curvature");
-  steering_angle_topic_ = declare_parameter<std::string>(
-    "steering_angle_topic", "/control/pure_pursuit/steering_angle");
-  output_topic_ = declare_parameter<std::string>(
-    "output_topic", "/control/pure_pursuit/output");
-  active_topic_ = declare_parameter<std::string>(
-    "active_topic", "/control/pure_pursuit/active");
-
-  wheel_base_m_ = declare_parameter<double>("wheel_base_m", 0.262);
-  lookahead_distance_m_ =
-    declare_parameter<double>("lookahead_distance_m", 0.55);
-  straight_lookahead_distance_m_ =
-    declare_parameter<double>("straight_lookahead_distance_m", 0.72);
-  normalized_lateral_scale_m_ =
-    declare_parameter<double>("normalized_lateral_scale_m", 0.70);
-  max_steering_angle_rad_ =
-    declare_parameter<double>("max_steering_angle_rad", 0.40);
-  steering_sign_ =
-    declare_parameter<double>("steering_sign", -1.0);
-
-  error_filter_alpha_ =
-    declare_parameter<double>("error_filter_alpha", 0.20);
-  error_deadband_ =
-    declare_parameter<double>("error_deadband", 0.012);
-  normal_error_limit_ =
-    declare_parameter<double>("normal_error_limit", 0.45);
-  degraded_error_limit_ =
-    declare_parameter<double>("degraded_error_limit", 0.25);
-
-  perception_timeout_sec_ =
-    declare_parameter<double>("perception_timeout_sec", 0.15);
-  control_frequency_hz_ =
-    declare_parameter<double>("control_frequency_hz", 40.0);
-
-  max_linear_speed_ =
-    declare_parameter<double>("max_linear_speed", 1.00);
-  min_linear_speed_ =
-    declare_parameter<double>("min_linear_speed", 0.25);
-  degraded_linear_speed_ =
-    declare_parameter<double>("degraded_linear_speed", 0.18);
-
-  max_lateral_accel_mps2_ =
-    declare_parameter<double>("max_lateral_accel_mps2", 0.20);
-
-  max_acceleration_ =
-    declare_parameter<double>("max_acceleration", 0.18);
-  max_deceleration_ =
-    declare_parameter<double>("max_deceleration", 2.50);
-
-  angular_rate_limit_ =
-    declare_parameter<double>("angular_rate_limit", 3.0);
-
-  turn_preview_enabled_ =
-    declare_parameter<bool>("turn_preview_enabled", true);
-  turn_preview_timeout_sec_ =
-    declare_parameter<double>("turn_preview_timeout_sec", 0.25);
-  turn_preview_min_speed_ =
-    declare_parameter<double>("turn_preview_min_speed", 0.18);
-
-  wheel_base_m_ = std::max(wheel_base_m_, 1e-3);
-  lookahead_distance_m_ = std::max(lookahead_distance_m_, 0.05);
-  straight_lookahead_distance_m_ =
-    std::max(straight_lookahead_distance_m_, lookahead_distance_m_);
-  normalized_lateral_scale_m_ =
-    std::max(normalized_lateral_scale_m_, 1e-3);
-  max_steering_angle_rad_ =
-    std::clamp(std::abs(max_steering_angle_rad_), 0.01, 1.2);
-
-  error_filter_alpha_ =
-    std::clamp(error_filter_alpha_, 0.0, 1.0);
-  error_deadband_ = std::max(error_deadband_, 0.0);
-  normal_error_limit_ =
-    std::clamp(std::abs(normal_error_limit_), 0.01, 1.0);
-  degraded_error_limit_ =
-    std::clamp(
-      std::abs(degraded_error_limit_),
-      0.01,
-      normal_error_limit_);
-
-  perception_timeout_sec_ =
-    std::max(perception_timeout_sec_, 0.01);
-  control_frequency_hz_ =
-    std::max(control_frequency_hz_, 1.0);
-
-  max_linear_speed_ = std::max(max_linear_speed_, 0.0);
-  min_linear_speed_ =
-    std::clamp(min_linear_speed_, 0.0, max_linear_speed_);
-  degraded_linear_speed_ =
-    std::clamp(degraded_linear_speed_, 0.0, max_linear_speed_);
-
-  max_lateral_accel_mps2_ =
-    std::max(max_lateral_accel_mps2_, 1e-4);
-  max_acceleration_ = std::max(max_acceleration_, 0.0);
-  max_deceleration_ = std::max(max_deceleration_, 0.0);
-  angular_rate_limit_ = std::max(angular_rate_limit_, 0.0);
-
-  turn_preview_timeout_sec_ =
-    std::max(turn_preview_timeout_sec_, 0.01);
-  turn_preview_min_speed_ =
-    std::clamp(turn_preview_min_speed_, 0.0, max_linear_speed_);
-
+  wheelbase_ = declare_parameter<double>("wheel_base_m", 0.3187);
+  steering_limit_ = declare_parameter<double>("steering_limit_rad", 0.4);
+  vmax_ = declare_parameter<double>("max_linear_speed", 0.5);
+  preview_speed_ = declare_parameter<double>("preview_speed", 0.18);
+  degraded_speed_ = declare_parameter<double>("degraded_speed", 0.12);
+  a_lat_ = declare_parameter<double>("max_lateral_acceleration", 0.20);
+  acceleration_ = declare_parameter<double>("max_acceleration", 0.15);
+  deceleration_ = declare_parameter<double>("max_deceleration", 1.0);
+  timeout_ = declare_parameter<double>("perception_timeout_sec", 0.20);
+  frequency_ = declare_parameter<double>("control_frequency_hz", 40.0);
+  preview_activation_score_ = declare_parameter<double>("preview_activation_score", 0.75);
   enabled_ = declare_parameter<bool>("enabled_on_start", false);
+  for (double value : {wheelbase_, steering_limit_, vmax_, preview_speed_, degraded_speed_,
+    a_lat_, acceleration_, deceleration_, timeout_, frequency_})
+  {
+    if (!std::isfinite(value) || value <= 0.0) {
+      throw std::invalid_argument("Pure Pursuit parameters must be finite and positive");
+    }
+  }
+  if (!std::isfinite(preview_activation_score_) || preview_activation_score_ < 0.0 ||
+    preview_activation_score_ >= 1.0 || steering_limit_ > 0.4 || preview_speed_ > vmax_ || degraded_speed_ > vmax_ ||
+    acceleration_ >= deceleration_ || frequency_ < 1.0 || frequency_ > 500.0)
+  {
+    throw std::invalid_argument("Invalid speed envelope, steering limit or frequency");
+  }
 
-  error_sub_ = create_subscription<std_msgs::msg::Float64>(
-    error_topic_, 10,
-    std::bind(
-      &PurePursuitController::errorCallback,
-      this,
-      std::placeholders::_1));
+  // Fixed, documented interfaces can be changed with ROS remappings.
+  const auto qos = rclcpp::QoS(1).reliable();
+  // Use the latest perception sample with a separate watchdog for each input.
+  const auto perception_qos = rclcpp::SensorDataQoS().keep_last(1);
+  command_pub_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", qos);
+  auto scalar = [this, &qos](const std::string & name) {
+      return create_publisher<std_msgs::msg::Float64>("/control/pure_pursuit/" + name, qos);
+    };
+  alpha_pub_ = scalar("alpha");
+  curvature_pub_ = scalar("curvature");
+  steering_pub_ = scalar("steering_angle");
+  speed_pub_ = scalar("current_speed");  // Command, not measured odometry.
+  omega_pub_ = scalar("output");
+  active_pub_ = create_publisher<std_msgs::msg::Bool>("/control/pure_pursuit/active", qos);
 
-  valid_sub_ = create_subscription<std_msgs::msg::Bool>(
-    valid_topic_, 10,
-    std::bind(
-      &PurePursuitController::validCallback,
-      this,
-      std::placeholders::_1));
+  status_pub_ = create_publisher<std_msgs::msg::String>("/control/pure_pursuit/status", qos);
 
-  degraded_sub_ = create_subscription<std_msgs::msg::Bool>(
-    degraded_topic_, 10,
-    std::bind(
-      &PurePursuitController::degradedCallback,
-      this,
-      std::placeholders::_1));
-
-  turn_preview_sub_ = create_subscription<std_msgs::msg::Float64>(
-    turn_preview_topic_, 10,
-    std::bind(
-      &PurePursuitController::turnPreviewCallback,
-      this,
-      std::placeholders::_1));
-
-  cmd_vel_pub_ =
-    create_publisher<geometry_msgs::msg::Twist>(
-      cmd_vel_topic_, 10);
-
-  current_speed_pub_ =
-    create_publisher<std_msgs::msg::Float64>(
-      current_speed_topic_, 10);
-
-  lateral_target_pub_ =
-    create_publisher<std_msgs::msg::Float64>(lateral_target_topic_, 10);
-  alpha_pub_ =
-    create_publisher<std_msgs::msg::Float64>(alpha_topic_, 10);
-  curvature_pub_ =
-    create_publisher<std_msgs::msg::Float64>(curvature_topic_, 10);
-  steering_angle_pub_ =
-    create_publisher<std_msgs::msg::Float64>(steering_angle_topic_, 10);
-  output_pub_ =
-    create_publisher<std_msgs::msg::Float64>(output_topic_, 10);
-  active_pub_ =
-    create_publisher<std_msgs::msg::Bool>(active_topic_, 10);
-
-  enable_service_ = create_service<std_srvs::srv::SetBool>(
-    "/pure_pursuit_controller/enable",
-    std::bind(
-      &PurePursuitController::enableCallback,
-      this,
-      std::placeholders::_1,
-      std::placeholders::_2));
-
-  const auto period =
-    std::chrono::duration<double>(1.0 / control_frequency_hz_);
-
-  control_timer_ =
-    create_wall_timer(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(period),
-      std::bind(
-        &PurePursuitController::controlLoop,
-        this));
-
-  last_control_time_ = SteadyClock::now();
-
-  RCLCPP_INFO(
-    get_logger(),
-    "Pure Pursuit v3: Ld=%.3f..%.3f m, vmax=%.3f m/s, alat=%.3f m/s^2",
-    lookahead_distance_m_,
-    straight_lookahead_distance_m_,
-    max_linear_speed_,
-    max_lateral_accel_mps2_);
+  target_sub_ = create_subscription<geometry_msgs::msg::PointStamped>(
+    "/lane_detection/target", perception_qos,
+    [this](geometry_msgs::msg::PointStamped::ConstSharedPtr msg) {
+      const rclcpp::Time stamp(msg->header.stamp);
+      const double age = (now() - stamp).seconds();
+      const bool advancing = stamp > target_stamp_;
+      // A reset/replayed/duplicate frame cannot refresh the watchdog.
+      if (!advancing) {
+        target_ok_ = false;
+        target_problem_ = "TARGET_TIMESTAMP_NOT_ADVANCING";
+        if (enabled_) { stop(target_problem_); }
+      }
+      if (stamp < target_stamp_) { target_stamp_ = stamp; }
+      if (!advancing) { return; }
+      target_stamp_ = stamp;
+      target_time_ = Clock::now();
+      target_ = {msg->point.x, msg->point.y};
+      target_ok_ = msg->header.frame_id == "base_link" && stamp.nanoseconds() > 0 &&
+        age >= 0.0 && age <= timeout_ && std::isfinite(target_.x) &&
+        std::isfinite(target_.y) && target_.x > 0.0 &&
+        std::isfinite(msg->point.z) && std::abs(msg->point.z) < 1e-9 &&
+        std::isfinite(std::hypot(target_.x, target_.y)) && std::hypot(target_.x, target_.y) >= 0.05;
+      // Classify invalid targets for diagnostics.
+      target_problem_ = "TARGET_INVALID_GEOMETRY";
+      if (msg->header.frame_id != "base_link") { target_problem_ = "TARGET_WRONG_FRAME"; }
+      else if (stamp.nanoseconds() <= 0) { target_problem_ = "TARGET_ZERO_TIMESTAMP"; }
+      else if (age < 0.0) {
+        target_problem_ = "TARGET_IN_FUTURE age_sec=" + std::to_string(age);
+      } else if (age > timeout_) {
+        target_problem_ = "TARGET_TOO_OLD age_sec=" + std::to_string(age);
+      } else if (!std::isfinite(target_.x) || !std::isfinite(target_.y)) {
+        target_problem_ = "TARGET_NONFINITE";
+      }
+      if (!target_ok_ && enabled_) { stop(target_problem_); }
+    });
+  valid_sub_ = create_subscription<std_msgs::msg::Bool>("/lane_detection/valid", perception_qos,
+    [this](std_msgs::msg::Bool::ConstSharedPtr msg) {
+      valid_ = msg->data; have_valid_ = true; valid_time_ = Clock::now();
+      if (!valid_ && enabled_) { stop("LANE_INVALID"); }
+    });
+  degraded_sub_ = create_subscription<std_msgs::msg::Bool>("/lane_detection/target_degraded", perception_qos,
+    [this](std_msgs::msg::Bool::ConstSharedPtr msg) {
+      degraded_ = msg->data; have_degraded_ = true; degraded_time_ = Clock::now();
+    });
+  preview_sub_ = create_subscription<std_msgs::msg::Float64>("/lane_detection/turn_preview", perception_qos,
+    [this](std_msgs::msg::Float64::ConstSharedPtr msg) {
+      preview_ok_ = std::isfinite(msg->data) && msg->data >= 0.0 && msg->data <= 1.0;
+      preview_ = preview_ok_ ? msg->data : 1.0; preview_time_ = Clock::now();
+    });
+  enable_service_ = create_service<std_srvs::srv::SetBool>("/pure_pursuit_controller/enable",
+    std::bind(&PurePursuitController::enableCallback, this, std::placeholders::_1, std::placeholders::_2));
+  loop_stamp_ = now();
+  timer_ = create_wall_timer(std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::duration<double>(1.0 / frequency_)), std::bind(&PurePursuitController::controlLoop, this));
+  stop(enabled_ ? "WAITING_FOR_TARGET" : "DISABLED");
+  RCLCPP_INFO(get_logger(),
+    "PP corner-support build: perception_qos=BEST_EFFORT depth=1, use_sim_time=%s, timeout=%.6f s, frequency=%.3f Hz, "
+    "vmax=%.3f, preview_speed=%.3f, degraded_speed=%.3f, acceleration=%.3f, deceleration=%.3f, preview_activation=%.3f",
+    get_parameter("use_sim_time").as_bool() ? "true" : "false",
+    timeout_, frequency_, vmax_, preview_speed_, degraded_speed_, acceleration_, deceleration_,
+    preview_activation_score_);
 }
 
-void PurePursuitController::errorCallback(
-  const std_msgs::msg::Float64::ConstSharedPtr msg)
+bool PurePursuitController::fresh(const Clock::time_point time) const
 {
-  latest_error_ = msg->data;
-  have_error_ = true;
-  last_error_time_ = SteadyClock::now();
-}
-
-void PurePursuitController::validCallback(
-  const std_msgs::msg::Bool::ConstSharedPtr msg)
-{
-  lane_valid_ = msg->data;
-}
-
-void PurePursuitController::degradedCallback(
-  const std_msgs::msg::Bool::ConstSharedPtr msg)
-{
-  lane_degraded_ = msg->data;
-}
-
-void PurePursuitController::turnPreviewCallback(
-  const std_msgs::msg::Float64::ConstSharedPtr msg)
-{
-  latest_turn_preview_ = std::clamp(msg->data, 0.0, 1.0);
-  have_turn_preview_ = true;
-  last_turn_preview_time_ = SteadyClock::now();
+  return std::chrono::duration<double>(Clock::now() - time).count() <= timeout_;
 }
 
 void PurePursuitController::enableCallback(
@@ -244,323 +128,122 @@ void PurePursuitController::enableCallback(
   std::shared_ptr<std_srvs::srv::SetBool::Response> response)
 {
   enabled_ = request->data;
-  resetController();
-
-  if (enabled_) {
-    response->success = true;
-    response->message = "Pure Pursuit controller enabled";
-    RCLCPP_INFO(get_logger(), "Pure Pursuit controller ENABLED");
-  } else {
-    publishCommand(0.0, 0.0);
-    response->success = true;
-    response->message =
-      "Pure Pursuit controller disabled and vehicle stopped";
-    RCLCPP_INFO(get_logger(), "Pure Pursuit controller DISABLED");
-  }
+  target_ok_ = false; have_valid_ = false; have_degraded_ = false; preview_ok_ = false;
+  loop_stamp_ = now();
+  target_problem_ = "WAITING_FOR_TARGET";
+  stop(enabled_ ? "WAITING_FOR_TARGET" : "DISABLED");
+  response->success = true;
+  response->message = enabled_ ? "Enabled; waiting for fresh perception" : "Disabled; zero Twist sent";
 }
 
-void PurePursuitController::resetController()
-{
-  filtered_error_ = 0.0;
-  have_filtered_error_ = false;
-  last_commanded_angular_z_ = 0.0;
-  last_commanded_linear_x_ = 0.0;
-}
-
-void PurePursuitController::publishCommand(
-  const double linear_x,
-  const double angular_z)
+void PurePursuitController::publish(const double speed, const double omega,
+  const pp::Solution & solution, const bool active)
 {
   geometry_msgs::msg::Twist command;
-  command.linear.x = linear_x;
-  command.angular.z = angular_z;
-  cmd_vel_pub_->publish(command);
-
-  std_msgs::msg::Float64 speed_msg;
-  speed_msg.data = linear_x;
-  current_speed_pub_->publish(speed_msg);
-}
-
-void PurePursuitController::publishDebug(
-  const double lateral_target_m,
-  const double alpha_rad,
-  const double curvature,
-  const double steering_angle_rad,
-  const double angular_command,
-  const bool active)
-{
-  std_msgs::msg::Float64 value;
-
-  value.data = lateral_target_m;
-  lateral_target_pub_->publish(value);
-
-  value.data = alpha_rad;
-  alpha_pub_->publish(value);
-
-  value.data = curvature;
-  curvature_pub_->publish(value);
-
-  value.data = steering_angle_rad;
-  steering_angle_pub_->publish(value);
-
-  value.data = angular_command;
-  output_pub_->publish(value);
-
-  std_msgs::msg::Bool active_msg;
-  active_msg.data = active;
-  active_pub_->publish(active_msg);
-}
-
-double PurePursuitController::limitAngularRate(
-  const double target,
-  const double dt)
-{
-  if (angular_rate_limit_ <= 0.0) {
-    last_commanded_angular_z_ = target;
-    return target;
+  command.linear.x = speed;
+  command.angular.z = omega;
+  command_pub_->publish(command);
+  auto scalar = [](const ScalarPub & publisher, const double value) {
+      std_msgs::msg::Float64 msg; msg.data = value; publisher->publish(msg);
+    };
+  scalar(alpha_pub_, solution.alpha);
+  scalar(curvature_pub_, solution.curvature);
+  scalar(steering_pub_, solution.steering);
+  scalar(speed_pub_, speed);
+  scalar(omega_pub_, omega);
+  std_msgs::msg::Bool state; state.data = active; active_pub_->publish(state);
+  if (active) {
+    std::ostringstream detail;
+    detail << std::fixed << std::setprecision(4)
+           << (degraded_ ? "RUNNING_DEGRADED" : "RUNNING_NORMAL")
+           << " target_distance_m=" << std::hypot(target_.x, target_.y)
+           << " requested_curvature=" << solution.requested_curvature
+           << " curvature=" << solution.curvature
+           << " saturated=" << (std::abs(solution.requested_curvature - solution.curvature) > 1e-9)
+           << " speed=" << speed;
+    publishStatus(detail.str());
   }
-
-  const double max_delta =
-    angular_rate_limit_ * dt;
-
-  const double next =
-    std::clamp(
-      target,
-      last_commanded_angular_z_ - max_delta,
-      last_commanded_angular_z_ + max_delta);
-
-  last_commanded_angular_z_ = next;
-  return next;
 }
 
-double PurePursuitController::limitLinearSpeed(
-  const double target,
-  const double dt)
+void PurePursuitController::publishStatus(const std::string & reason)
 {
-  const double delta =
-    target - last_commanded_linear_x_;
-
-  if (delta >= 0.0) {
-    last_commanded_linear_x_ +=
-      std::min(delta, max_acceleration_ * dt);
-  } else {
-    last_commanded_linear_x_ +=
-      std::max(delta, -max_deceleration_ * dt);
+  std_msgs::msg::String message;
+  message.data = reason;
+  status_pub_->publish(message);
+  // Log state transitions as well: a short stop may be replaced by RUNNING
+  // before a depth-one diagnostic subscriber observes its topic message.
+  const auto code = reason.substr(0, reason.find(' '));
+  if (code != last_status_code_) {
+    RCLCPP_INFO(get_logger(), "PP status: %s", reason.c_str());
+    last_status_code_ = code;
   }
+}
 
-  last_commanded_linear_x_ =
-    std::clamp(
-      last_commanded_linear_x_,
-      0.0,
-      max_linear_speed_);
-
-  return last_commanded_linear_x_;
+void PurePursuitController::stop(const std::string & reason)
+{
+  speed_ = 0.0;
+  publish(0.0, 0.0, {0.0, 0.0, 0.0, 0.0}, false);
+  const auto steady_now = Clock::now();
+  auto age = [steady_now](Clock::time_point time) {
+      return time == Clock::time_point{} ? -1.0 :
+        std::chrono::duration<double>(steady_now - time).count();
+    };
+  std::ostringstream detail;
+  detail << std::fixed << std::setprecision(6) << reason
+         << " source_age_s=" << (now() - target_stamp_).seconds()
+         << " target_rx_age_s=" << age(target_time_)
+         << " valid_rx_age_s=" << age(valid_time_)
+         << " degraded_rx_age_s=" << age(degraded_time_)
+         << " control_dt_s=" << last_loop_dt_
+         << " timeout_s=" << timeout_ << " target_x=" << target_.x << " target_y=" << target_.y;
+  publishStatus(detail.str());
 }
 
 void PurePursuitController::controlLoop()
 {
-  const auto now = SteadyClock::now();
-
-  double dt =
-    std::chrono::duration<double>(
-      now - last_control_time_).count();
-
-  last_control_time_ = now;
-
-  if (dt <= 0.0 || dt > 0.5) {
-    dt = 1.0 / control_frequency_hz_;
+  const auto current = now();
+  const double elapsed = (current - loop_stamp_).seconds();
+  last_loop_dt_ = elapsed;
+  loop_stamp_ = current;
+  // Wall-clock watchdog still runs if simulation time stops. All essential
+  // input streams need their own freshness checks, not only the target.
+  const double image_age = (current - target_stamp_).seconds();
+  // Report the first failing input check.
+  if (!enabled_) { stop("DISABLED"); return; }
+  if (!target_ok_) { stop(target_problem_); return; }
+  if (!have_valid_) { stop("WAITING_FOR_VALID"); return; }
+  if (!valid_) { stop("LANE_INVALID"); return; }
+  if (!have_degraded_) { stop("WAITING_FOR_DEGRADED"); return; }
+  if (!fresh(target_time_)) { stop("TARGET_RECEIPT_TIMEOUT"); return; }
+  if (!fresh(valid_time_)) { stop("VALID_RECEIPT_TIMEOUT"); return; }
+  if (!fresh(degraded_time_)) { stop("DEGRADED_RECEIPT_TIMEOUT"); return; }
+  if (image_age < 0.0) {
+    stop("TARGET_IN_FUTURE age_sec=" + std::to_string(image_age)); return;
   }
-
-  if (!enabled_) {
-    return;
+  if (image_age > timeout_) {
+    stop("TARGET_TOO_OLD age_sec=" + std::to_string(image_age)); return;
   }
-
-  bool perception_stale = !have_error_;
-
-  if (have_error_) {
-    const double error_age =
-      std::chrono::duration<double>(
-        now - last_error_time_).count();
-
-    perception_stale =
-      error_age > perception_timeout_sec_;
-  }
-
-  if (!lane_valid_ || perception_stale) {
-    resetController();
-    publishCommand(0.0, 0.0);
-    publishDebug(0.0, 0.0, 0.0, 0.0, 0.0, false);
-    return;
-  }
-
-  if (!have_filtered_error_) {
-    filtered_error_ = latest_error_;
-    have_filtered_error_ = true;
-  } else {
-    filtered_error_ =
-      error_filter_alpha_ * latest_error_
-      + (1.0 - error_filter_alpha_) * filtered_error_;
-  }
-
-  const double error_limit =
-    lane_degraded_
-    ? degraded_error_limit_
-    : normal_error_limit_;
-
-  double normalized_error =
-    std::clamp(filtered_error_, -error_limit, error_limit);
-
-  if (std::abs(normalized_error) < error_deadband_) {
-    normalized_error = 0.0;
-  }
-
-  const double lateral_target_m =
-    normalized_error * normalized_lateral_scale_m_;
-
-  // Continuous preview-adaptive lookahead:
-  // straight: longer lookahead for calm steering
-  // corner: smoothly returns to the base lookahead
-  double preview_risk = 1.0;
-  bool preview_fresh = false;
-
-  if (turn_preview_enabled_ && have_turn_preview_) {
-    const double preview_age =
-      std::chrono::duration<double>(
-        now - last_turn_preview_time_).count();
-
-    preview_fresh =
-      preview_age <= turn_preview_timeout_sec_;
-
-    if (preview_fresh) {
-      preview_risk =
-        std::clamp(latest_turn_preview_, 0.0, 1.0);
-    }
-  }
-
-  if (lane_degraded_) {
-    preview_risk = 1.0;
-  }
-
-  const double effective_lookahead_m =
-    lookahead_distance_m_
-    + (1.0 - preview_risk) *
-      (straight_lookahead_distance_m_ - lookahead_distance_m_);
-
-  const double target_distance_m =
-    std::hypot(
-      effective_lookahead_m,
-      lateral_target_m);
-
-  const double alpha_rad =
-    std::atan2(
-      lateral_target_m,
-      effective_lookahead_m);
-
-  double curvature = 0.0;
-
-  if (target_distance_m > 1e-6) {
-    curvature =
-      2.0 * std::sin(alpha_rad) / target_distance_m;
-  }
-
-  double steering_angle_rad =
-    std::atan(wheel_base_m_ * curvature);
-
-  steering_angle_rad =
-    std::clamp(
-      steering_angle_rad,
-      -max_steering_angle_rad_,
-      max_steering_angle_rad_);
-
-  curvature =
-    std::tan(steering_angle_rad) / wheel_base_m_;
-
-  // Curvature based speed limit:
-  // a_lat = v^2 * |curvature|
-  // v = sqrt(a_lat_max / |curvature|)
-  double curvature_speed_limit =
-    max_linear_speed_;
-
-  const double abs_curvature =
-    std::abs(curvature);
-
-  if (abs_curvature > 1e-4) {
-    curvature_speed_limit =
-      std::sqrt(
-        max_lateral_accel_mps2_ /
-        abs_curvature);
-  }
-
-  curvature_speed_limit =
-    std::clamp(
-      curvature_speed_limit,
-      min_linear_speed_,
-      max_linear_speed_);
-
-  // Continuous RAW-camera turn-preview speed limit.
-  // No threshold / full-brake threshold / exponent:
-  // 0.0 -> max speed
-  // 1.0 -> preview minimum speed
-  double preview_speed_limit =
-    max_linear_speed_;
-
-  if (turn_preview_enabled_ && preview_fresh) {
-    preview_speed_limit =
-      max_linear_speed_
-      - preview_risk *
-        (max_linear_speed_ - turn_preview_min_speed_);
-  }
-
-  double target_speed =
-    std::min(
-      curvature_speed_limit,
-      preview_speed_limit);
-
-  if (lane_degraded_) {
-    target_speed =
-      std::min(
-        target_speed,
-        degraded_linear_speed_);
-  }
-
-  const double commanded_speed =
-    limitLinearSpeed(
-      target_speed,
-      dt);
-
-  // No redundant yaw-rate clamp:
-  // steering_angle_rad is already physically limited to 0.4 rad.
-  const double target_angular =
-    steering_sign_ *
-    commanded_speed *
-    curvature;
-
-  const double angular_command =
-    limitAngularRate(
-      target_angular,
-      dt);
-
-  publishCommand(
-    commanded_speed,
-    angular_command);
-
-  publishDebug(
-    lateral_target_m,
-    alpha_rad,
-    curvature,
-    steering_angle_rad,
-    angular_command,
-    true);
+  if (elapsed < 0.0) { stop("CLOCK_MOVED_BACKWARD"); return; }
+  if (elapsed > timeout_) { stop("CONTROL_TIME_GAP"); return; }
+  if (elapsed == 0.0) { publishStatus("WAITING_FOR_CLOCK_ADVANCE"); return; }
+  const double dt = std::min(elapsed, 2.0 / frequency_);
+  const auto solution = pp::solve(target_, wheelbase_, steering_limit_);
+  // Missing/invalid preview is conservative, never permission to accelerate.
+  const double risk = preview_ok_ && fresh(preview_time_) ?
+    pp::previewRisk(preview_, preview_activation_score_) : 1.0;
+  const double desired = pp::speedLimit(solution.curvature, risk, degraded_,
+    vmax_, preview_speed_, degraded_speed_, a_lat_);
+  speed_ = pp::rateLimit(speed_, desired, dt, acceleration_, deceleration_);
+  // Twist angular.z is yaw rate [rad/s], NOT steering angle [rad].
+  // No independent yaw-rate slew limiter: omega/v must remain curvature.
+  publish(speed_, speed_ * solution.curvature, solution, true);
 }
-
 }  // namespace wheeltec_autorace_application
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(
-    std::make_shared<
-      wheeltec_autorace_application::PurePursuitController>());
+  rclcpp::spin(std::make_shared<wheeltec_autorace_application::PurePursuitController>());
   rclcpp::shutdown();
   return 0;
 }
