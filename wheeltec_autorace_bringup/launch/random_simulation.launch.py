@@ -33,7 +33,7 @@ def generate_launch_description():
     get_package_share_directory("wheeltec_autorace_evaluation")
 
     generator_default = os.path.expanduser(
-        "~/wheeltec_pp_clean_ws/src/"
+        "~/ros2_ws/src/"
         "wheeltec_autorace_sim/tools/generate_multicorner_track.py"
     )
 
